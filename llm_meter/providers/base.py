@@ -72,7 +72,6 @@ class Section:
 @dataclass
 class Snapshot:
     sections: list[Section] = field(default_factory=list)
-    tooltip: str = ""
     badge: Optional[str] = None
     gauge_percent: Optional[float] = None
 

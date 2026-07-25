@@ -139,7 +139,6 @@ class OpenCodeProvider(Provider):
         sections = [self._go_section(data), self._zen_section(data.console.zen)]
         return Snapshot(
             sections=sections,
-            tooltip=self._tooltip(data.console),
             gauge_percent=self._gauge_percent(data.console),
         )
 
@@ -249,20 +248,6 @@ class OpenCodeProvider(Provider):
         ]
         values = [value for value in percents if value is not None]
         return max(values) if values else None
-
-    def _tooltip(self, console: api.ConsoleData) -> str:
-        parts = []
-        for korean, english, key in PERIODS:
-            percent = api.usage_percent(getattr(console.go, key, None)) if console.go else None
-            label = tr(korean, english)
-            parts.append(f"{label} {fmt.percent(percent)}" if percent is not None else f"{label} ?")
-        line = "OpenCode Go " + " · ".join(parts)
-        if console.zen and console.zen.balance is not None:
-            line += tr(
-                f" · Zen {fmt.money(console.zen.balance)}",
-                f" · Zen {fmt.money(console.zen.balance)}",
-            )
-        return line
 
     # ------------------------------------------------------------------ menu
 

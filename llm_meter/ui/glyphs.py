@@ -181,8 +181,8 @@ def provider_pixmap(provider_id: str, size: int, color: QColor) -> QPixmap:
 def gauge_pixmap(size: int, percent: float | None, color: QColor) -> QPixmap:
     """A 270-degree dial whose needle points at `percent`.
 
-    Single ink only, since the tray hands this to macOS as a template image: the
-    dial is the same colour at low opacity, the needle at full strength. With no
+    Single solid ink only: the tray hands this to macOS as a template image, so
+    both the dial and needle stay fully opaque for menu-bar contrast. With no
     reading yet the needle rests at zero.
     """
     pixmap = QPixmap(size, size)
@@ -190,21 +190,19 @@ def gauge_pixmap(size: int, percent: float | None, color: QColor) -> QPixmap:
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    stroke = max(1.0, size * 0.10)
-    margin = stroke / 2 + size * 0.09
+    # Tight inset so the glyph fills most of the menu-bar slot.
+    stroke = max(1.25, size * 0.12)
+    margin = stroke / 2 + max(0.5, size * 0.02)
     box = QRectF(margin, margin, size - 2 * margin, size - 2 * margin)
     start_angle, sweep = 225.0, -270.0
 
-    dial = QColor(color)
-    dial.setAlphaF(color.alphaF() * (0.38 if percent is not None else 0.26))
-    painter.setPen(QPen(dial, stroke, Qt.SolidLine, Qt.PenCapStyle.RoundCap))
+    painter.setPen(QPen(color, stroke, Qt.SolidLine, Qt.PenCapStyle.RoundCap))
     painter.drawArc(box, round(start_angle * 16), round(sweep * 16))
 
     ratio = max(0.0, min(100.0, percent)) / 100.0 if percent is not None else 0.0
     center = box.center()
     angle = math.radians(start_angle + sweep * ratio)
-    radius = box.width() / 2 * 0.70
-    painter.setPen(QPen(color, stroke, Qt.SolidLine, Qt.PenCapStyle.RoundCap))
+    radius = box.width() / 2 * 0.78
     painter.drawLine(
         center,
         QPointF(center.x() + radius * math.cos(angle), center.y() - radius * math.sin(angle)),

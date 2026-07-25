@@ -327,11 +327,14 @@ class GlyphTests(unittest.TestCase):
 
         self.assertNotEqual(low, high)
 
-    def test_a_known_percentage_is_drawn_more_boldly_than_an_unknown_one(self):
+    def test_an_unknown_reading_still_draws_a_full_dial(self):
         known = self.ink(glyphs.gauge_pixmap(44, 100, QColor("#000000")))
         unknown = self.ink(glyphs.gauge_pixmap(44, None, QColor("#000000")))
 
-        self.assertGreater(known, unknown)
+        self.assertGreater(known, 0)
+        self.assertGreater(unknown, 0)
+        # Dial + needle share the same opacity; totals stay in the same ballpark.
+        self.assertAlmostEqual(known, unknown, delta=known * 0.25)
 
     def test_each_service_has_its_own_mark(self):
         codex = glyphs.provider_pixmap("codex", 18, QColor("#000000")).toImage()

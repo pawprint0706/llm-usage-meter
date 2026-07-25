@@ -52,7 +52,6 @@ class MeterApp(QObject):
 
         self.popup = PopupWindow(self)
         self.tray = QSystemTrayIcon()
-        self.tray.setToolTip(APP_TITLE)
         self.tray.activated.connect(self._on_tray_activated)
 
         self._connect_signals()
@@ -169,7 +168,6 @@ class MeterApp(QObject):
 
     def _repaint(self) -> None:
         self._update_tray_icon()
-        self._update_tooltip()
         if self.popup.isVisible():
             self.popup.rebuild()
 
@@ -275,19 +273,6 @@ class MeterApp(QObject):
             icon.addPixmap(glyphs.gauge_pixmap(size, percent, color))
         icon.setIsMask(template)
         self.tray.setIcon(icon)
-
-    def _update_tooltip(self) -> None:
-        lines = []
-        for provider in self.providers:
-            if not provider.enabled:
-                continue
-            if provider.state is State.READY and provider.snapshot:
-                lines.append(provider.snapshot.tooltip)
-            elif provider.state is State.SIGNED_OUT:
-                lines.append(f"{provider.name}: {provider.signed_out_hint()}")
-            elif provider.message:
-                lines.append(f"{provider.name}: {provider.message}")
-        self.tray.setToolTip("\n".join(lines) if lines else APP_TITLE)
 
     # ------------------------------------------------------------------- actions
 

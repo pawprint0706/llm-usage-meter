@@ -105,7 +105,6 @@ class CodexProvider(Provider):
         ]
         return Snapshot(
             sections=sections,
-            tooltip=self._tooltip(data),
             badge=data.plan_type,
             gauge_percent=(
                 data.primary_window.used_percent if data.primary_window else None
@@ -182,21 +181,6 @@ class CodexProvider(Provider):
             metrics=metrics,
             empty_text=tr("보유한 재설정 없음", "No reset credits"),
         )
-
-    def _tooltip(self, data: api.UsageData) -> str:
-        parts = [
-            f"{_window_label(window.window_seconds)} {fmt.percent(window.used_percent)}"
-            for window in data.windows
-        ]
-        line = "Codex " + " · ".join(parts) if parts else "Codex"
-        if data.credits.unlimited:
-            return line + tr(" · 크레딧 무제한", " · unlimited credits")
-        if data.credits.has_credits:
-            return line + tr(
-                f" · 크레딧 {fmt.money(data.credits.balance)}",
-                f" · {fmt.money(data.credits.balance)} credits",
-            )
-        return line
 
     # ------------------------------------------------------------------ menu
 

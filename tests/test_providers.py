@@ -159,18 +159,6 @@ class CodexRenderTests(unittest.TestCase):
 
         self.assertEqual(section.note, "Could not load")
 
-    def test_the_tooltip_lists_every_window(self):
-        snapshot = self.provider.render(codex_usage())
-
-        self.assertEqual(snapshot.tooltip, "Codex 5h 12% · Weekly 85%")
-
-    def test_the_tooltip_mentions_credits_when_there_are_any(self):
-        credits = codex_api.CreditBalance(balance=12.5, has_credits=True)
-
-        snapshot = self.provider.render(codex_usage(credits=credits))
-
-        self.assertTrue(snapshot.tooltip.endswith("· $12.50 credits"))
-
 
 class CodexMenuTests(unittest.TestCase):
     def setUp(self):
@@ -299,13 +287,6 @@ class OpenCodeRenderTests(unittest.TestCase):
         snapshot = self.render()
 
         self.assertEqual(snapshot.gauge_percent, 53)
-
-    def test_the_tooltip_covers_all_periods_and_the_balance(self):
-        snapshot = self.render()
-
-        self.assertEqual(
-            snapshot.tooltip, "OpenCode Go 5h 53% · Week 20% · Month 10% · Zen $16.13"
-        )
 
     def test_countdowns_shrink_as_time_passes(self):
         loaded = Loaded(console=console(), monotonic=time.monotonic() - 1800)

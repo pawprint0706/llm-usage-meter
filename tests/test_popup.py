@@ -99,12 +99,13 @@ class ContentTests(PopupTestCase):
 
         tabs = self.tabs()
         self.assertIsNotNone(tabs)
-        self.assertEqual(tabs.count(), 2)
-        self.assertEqual(self.popup._tab_ids, ["codex", "opencode"])
+        self.assertEqual(tabs.count(), 3)
+        self.assertEqual(self.popup._tab_ids, ["codex", "opencode", "cursor"])
         self.assertEqual(
-            [tabs.tabToolTip(i) for i in range(tabs.count())], ["Codex", "OpenCode"]
+            [tabs.tabToolTip(i) for i in range(tabs.count())],
+            ["Codex", "OpenCode", "Cursor"],
         )
-        self.assertEqual(len(self.cards()), 2)
+        self.assertEqual(len(self.cards()), 3)
 
     def test_tab_order_follows_the_saved_provider_order(self):
         self.cfg.provider_order = ["opencode", "codex"]
@@ -114,10 +115,10 @@ class ContentTests(PopupTestCase):
 
         self.popup.rebuild()
 
-        self.assertEqual(self.popup._tab_ids, ["opencode", "codex"])
+        self.assertEqual(self.popup._tab_ids, ["opencode", "codex", "cursor"])
         self.assertEqual(
             [self.tabs().tabToolTip(i) for i in range(self.tabs().count())],
-            ["OpenCode", "Codex"],
+            ["OpenCode", "Codex", "Cursor"],
         )
 
     def test_a_disabled_service_is_left_out(self):
@@ -127,10 +128,12 @@ class ContentTests(PopupTestCase):
         self.popup.rebuild()
 
         tabs = self.tabs()
-        self.assertEqual(tabs.count(), 1)
-        self.assertEqual(self.popup._tab_ids, ["opencode"])
-        self.assertEqual(tabs.tabToolTip(0), "OpenCode")
-        self.assertEqual(len(self.cards()), 1)
+        self.assertEqual(tabs.count(), 2)
+        self.assertEqual(self.popup._tab_ids, ["opencode", "cursor"])
+        self.assertEqual(
+            [tabs.tabToolTip(i) for i in range(tabs.count())], ["OpenCode", "Cursor"]
+        )
+        self.assertEqual(len(self.cards()), 2)
 
     def test_every_section_is_rendered(self):
         self.make_ready()
@@ -236,7 +239,7 @@ class SizeTests(PopupTestCase):
 
         self.popup.rebuild()
 
-        self.assertEqual(len(self.cards()), 2)
+        self.assertEqual(len(self.cards()), 3)
         self.assertEqual(self.popup.height(), tall)
 
     def test_returning_to_a_shorter_tab_does_not_leave_a_taller_panel(self):
@@ -339,9 +342,13 @@ class GlyphTests(unittest.TestCase):
     def test_each_service_has_its_own_mark(self):
         codex = glyphs.provider_pixmap("codex", 18, QColor("#000000")).toImage()
         opencode = glyphs.provider_pixmap("opencode", 18, QColor("#000000")).toImage()
+        cursor = glyphs.provider_pixmap("cursor", 18, QColor("#000000")).toImage()
 
         self.assertFalse(codex.isNull())
+        self.assertFalse(cursor.isNull())
         self.assertNotEqual(codex, opencode)
+        self.assertNotEqual(cursor, codex)
+        self.assertNotEqual(cursor, opencode)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,8 @@ from llm_meter.providers import build_providers
 from llm_meter.providers.base import State
 from llm_meter.providers.codex import api as codex_api
 from llm_meter.providers.codex.provider import CodexProvider
+from llm_meter.providers.cursor import api as cursor_api
+from llm_meter.providers.cursor.provider import CursorProvider, Loaded as CursorLoaded
 from llm_meter.providers.opencode import api as opencode_api
 from llm_meter.providers.opencode.provider import OpenCodeProvider, Loaded
 
@@ -55,7 +57,9 @@ class RegistryTests(unittest.TestCase):
     def test_providers_are_built_in_display_order(self):
         providers = build_providers(Config(), FakeUi())
 
-        self.assertEqual([provider.id for provider in providers], ["codex", "opencode"])
+        self.assertEqual(
+            [provider.id for provider in providers], ["codex", "opencode", "cursor"]
+        )
         self.assertTrue(all(provider.enabled for provider in providers))
 
     def test_a_saved_order_is_honoured(self):
@@ -63,7 +67,9 @@ class RegistryTests(unittest.TestCase):
 
         providers = build_providers(cfg, FakeUi())
 
-        self.assertEqual([provider.id for provider in providers], ["opencode", "codex"])
+        self.assertEqual(
+            [provider.id for provider in providers], ["opencode", "codex", "cursor"]
+        )
 
     def test_a_disabled_service_reports_itself_as_such(self):
         cfg = Config()
@@ -73,6 +79,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertFalse(providers["codex"].enabled)
         self.assertTrue(providers["opencode"].enabled)
+        self.assertTrue(providers["cursor"].enabled)
 
 
 class CodexRenderTests(unittest.TestCase):
@@ -412,6 +419,109 @@ class OpenCodeSessionTests(unittest.TestCase):
                 opencode_api.stats_page("wrk_1"),
             ],
         )
+
+
+def cursor_usage(**overrides) -> cursor_api.UsageData:
+    data = cursor_api.parse_usage_summary(
+        {
+            "billingCycleStart": "2026-07-23T01:15:44.000Z",
+            "billingCycleEnd": "2026-08-23T01:15:44.000Z",
+            "membershipType": "pro",
+            "isUnlimited": False,
+            "autoModelSelectedDisplayMessage": "You've used 20% of your included total usage",
+            "individualUsage": {
+                "plan": {
+                    "enabled": True,
+                    "used": 2000,
+                    "limit": 2000,
+                    "remaining": 0,
+                    "breakdown": {"included": 2000, "bonus": 4981, "total": 6981},
+                    "autoPercentUsed": 8.3,
+                    "apiPercentUsed": 99.5,
+                    "totalPercentUsed": 20.2,
+                },
+                "onDemand": {"enabled": False, "used": 0, "limit": None, "remaining": None},
+            },
+        }
+    )
+    data.plan_name = "Pro"
+    data.plan_price = "$20/mo"
+    data.no_usage_based_allowed = True
+    for key, value in overrides.items():
+        setattr(data, key, value)
+    return data
+
+
+class CursorRenderTests(unittest.TestCase):
+    def setUp(self):
+        self.ui = FakeUi()
+        self.provider = CursorProvider(Config(), self.ui)
+        patcher = patch(
+            "llm_meter.providers.cursor.provider.auth.resolve_session",
+            return_value=None,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def render(self, usage: cursor_api.UsageData | None = None):
+        loaded = CursorLoaded(usage=usage or cursor_usage(), monotonic=time.monotonic())
+        return self.provider.render(loaded)
+
+    def test_sections_cover_usage_and_spending(self):
+        titles = [section.title for section in self.render().sections]
+
+        self.assertEqual(titles, ["Plan usage", "Spending"])
+
+    def test_plan_usage_shows_total_auto_and_api(self):
+        metrics = self.render().sections[0].metrics
+
+        self.assertEqual(metrics[0].label, "Total")
+        self.assertEqual(metrics[0].value, "20%")
+        self.assertAlmostEqual(metrics[0].percent, 20.2)
+        self.assertIn("resets in", metrics[0].detail)
+        self.assertEqual(metrics[1].label, "Auto")
+        self.assertEqual(metrics[2].label, "API")
+        self.assertEqual(metrics[2].value, "100%")
+        self.assertIsNone(self.render().sections[0].note)
+
+    def test_spending_shows_included_bonus_and_on_demand(self):
+        metrics = self.render().sections[1].metrics
+
+        self.assertEqual(metrics[0].label, "Included")
+        self.assertEqual(metrics[0].value, "$20.00 / $20")
+        self.assertAlmostEqual(metrics[0].percent, 100.0)
+        self.assertEqual(metrics[1].label, "Bonus")
+        self.assertEqual(metrics[1].value, "$49.81")
+        self.assertEqual(metrics[2].label, "On-demand")
+        self.assertEqual(metrics[2].value, "Off")
+        self.assertEqual(metrics[3].value, "$20/mo")
+
+    def test_badge_and_gauge_follow_the_plan(self):
+        snapshot = self.render()
+
+        self.assertEqual(snapshot.badge, "Pro")
+        self.assertAlmostEqual(snapshot.gauge_percent, 20.2)
+
+    def test_on_demand_spend_is_shown_when_enabled(self):
+        usage = cursor_usage()
+        usage.no_usage_based_allowed = False
+        usage.on_demand = cursor_api.OnDemandUsage(
+            enabled=True, used_cents=1234, limit_cents=5000
+        )
+
+        metric = self.render(usage).sections[1].metrics[2]
+
+        self.assertEqual(metric.label, "On-demand")
+        self.assertEqual(metric.value, "$12.34 / $50")
+        self.assertAlmostEqual(metric.percent, 24.68)
+
+    def test_menu_opens_usage_and_spending_pages(self):
+        labels = {entry.label: entry for entry in self.provider.menu()}
+
+        labels["Open usage page"].run()
+        labels["Open spending page"].run()
+
+        self.assertEqual(self.ui.opened, [cursor_api.USAGE_PAGE, cursor_api.SPENDING_PAGE])
 
 
 if __name__ == "__main__":

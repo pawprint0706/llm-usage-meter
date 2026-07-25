@@ -17,9 +17,14 @@ from .base import (
     State,
 )
 from .codex.provider import CodexProvider
+from .cursor.provider import CursorProvider
 from .opencode.provider import OpenCodeProvider
 
-PROVIDER_CLASSES: tuple[type[Provider], ...] = (CodexProvider, OpenCodeProvider)
+PROVIDER_CLASSES: tuple[type[Provider], ...] = (
+    CodexProvider,
+    OpenCodeProvider,
+    CursorProvider,
+)
 
 __all__ = [
     "ErrorKind",

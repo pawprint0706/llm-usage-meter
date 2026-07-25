@@ -26,10 +26,15 @@ def _handlers() -> list[logging.Handler]:
 def _uninstall() -> None:
     from . import autostart, config, keystore
     from .providers.codex import auth as codex_auth
+    from .providers.cursor import auth as cursor_auth
     from .providers.opencode import auth as opencode_auth
 
     autostart.disable()
-    for remove in (codex_auth.delete_credentials, opencode_auth.delete_session_key):
+    for remove in (
+        codex_auth.delete_credentials,
+        opencode_auth.delete_session_key,
+        cursor_auth.delete_pasted_session_token,
+    ):
         try:
             remove()
         except Exception:  # noqa: BLE001 — best effort, keep removing

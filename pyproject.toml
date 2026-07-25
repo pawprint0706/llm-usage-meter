@@ -22,4 +22,7 @@ build-backend = "setuptools.build_meta"
 include = ["llm_meter*"]
 
 [tool.setuptools.data-files]
-"share/llm-usage-meter" = ["assets/codex-blossom.ico"]
+"share/llm-usage-meter" = [
+    "assets/codex-blossom.ico",
+    "assets/cursor-cube.svg",
+]

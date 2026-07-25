@@ -26,7 +26,7 @@ class ConfigFileTests(unittest.TestCase):
         self.assertEqual(cfg.providers, {})
 
     def test_round_trip_keeps_provider_settings(self):
-        cfg = config.Config(refresh_interval=30)
+        cfg = config.Config(refresh_interval=30, provider_order=["opencode", "codex"])
         cfg.provider("opencode")["workspace_id"] = "wrk_123"
         cfg.set_provider_enabled("codex", False)
 
@@ -34,6 +34,7 @@ class ConfigFileTests(unittest.TestCase):
         loaded = config.load_config()
 
         self.assertEqual(loaded.refresh_interval, 30)
+        self.assertEqual(loaded.provider_order, ["opencode", "codex"])
         self.assertEqual(loaded.provider("opencode")["workspace_id"], "wrk_123")
         self.assertFalse(loaded.is_provider_enabled("codex"))
         self.assertTrue(loaded.is_provider_enabled("opencode"))
@@ -67,6 +68,40 @@ class ConfigFileTests(unittest.TestCase):
         config.save_config(config.Config(refresh_interval=60))
 
         self.assertEqual(sorted(os.listdir(self._dir.name)), ["config.json"])
+
+
+class ProviderOrderTests(unittest.TestCase):
+    def test_missing_ids_are_appended_in_registry_order(self):
+        cfg = config.Config(provider_order=["opencode"])
+
+        self.assertEqual(
+            cfg.ordered_provider_ids(["codex", "opencode", "cursor"]),
+            ["opencode", "codex", "cursor"],
+        )
+
+    def test_unknown_saved_ids_are_ignored(self):
+        cfg = config.Config(provider_order=["ghost", "codex", "opencode"])
+
+        self.assertEqual(cfg.ordered_provider_ids(["codex", "opencode"]), ["codex", "opencode"])
+
+    def test_move_swaps_neighbours(self):
+        cfg = config.Config(provider_order=["codex", "opencode"])
+
+        self.assertTrue(cfg.move_provider("opencode", -1, ["codex", "opencode"]))
+        self.assertEqual(cfg.provider_order, ["opencode", "codex"])
+        self.assertFalse(cfg.move_provider("opencode", -1, ["codex", "opencode"]))
+        self.assertTrue(cfg.move_provider("opencode", 1, ["codex", "opencode"]))
+        self.assertEqual(cfg.provider_order, ["codex", "opencode"])
+
+    def test_corrupt_order_entries_are_dropped(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._dir.cleanup)
+        with patch.object(config, "config_dir", return_value=self._dir.name):
+            with open(config.config_path(), "w", encoding="utf-8") as handle:
+                handle.write(json.dumps({"provider_order": ["codex", 3, "codex", "opencode"]}))
+            loaded = config.load_config()
+
+        self.assertEqual(loaded.provider_order, ["codex", "opencode"])
 
 
 if __name__ == "__main__":

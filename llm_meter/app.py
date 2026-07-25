@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QSys
 
 from . import autostart, config, platform_mac
 from .i18n import tr
-from .providers import MenuEntry, Provider, State, build_providers
+from .providers import MenuEntry, Provider, State, build_providers, known_provider_ids
 from .ui import glyphs, theme
 from .ui.popup import PopupWindow
 from .ui.widgets import style_menu
@@ -331,6 +331,22 @@ class MeterApp(QObject):
                 lambda checked, pid=provider.id: self._set_provider_enabled(pid, checked)
             )
 
+        order_menu = menu.addMenu(tr("탭 순서", "Tab order"))
+        style_menu(order_menu, palette)
+        for index, provider in enumerate(self.providers):
+            item = order_menu.addMenu(f"{index + 1}. {provider.name}")
+            style_menu(item, palette)
+            up = item.addAction(tr("앞으로 이동", "Move up"))
+            up.setEnabled(index > 0)
+            up.triggered.connect(
+                lambda _checked=False, pid=provider.id: self._move_provider(pid, -1)
+            )
+            down = item.addAction(tr("뒤로 이동", "Move down"))
+            down.setEnabled(index < len(self.providers) - 1)
+            down.triggered.connect(
+                lambda _checked=False, pid=provider.id: self._move_provider(pid, 1)
+            )
+
         autostart_action = menu.addAction(tr("로그인 시 자동 시작", "Start at login"))
         autostart_action.setCheckable(True)
         autostart_action.setChecked(autostart.is_enabled())
@@ -360,6 +376,19 @@ class MeterApp(QObject):
         self._repaint_timer.start()
         if self.popup.isVisible():
             self.popup.rebuild()
+
+    def _move_provider(self, provider_id: str, delta: int) -> None:
+        if not self.cfg.move_provider(provider_id, delta, known_provider_ids()):
+            return
+        config.save_config(self.cfg)
+        self.providers = [
+            self._providers_by_id[provider_id]
+            for provider_id in self.cfg.ordered_provider_ids(known_provider_ids())
+            if provider_id in self._providers_by_id
+        ]
+        if self.popup.isVisible():
+            self.popup.rebuild()
+        self._repaint_timer.start()
 
     def _toggle_autostart(self) -> None:
         try:

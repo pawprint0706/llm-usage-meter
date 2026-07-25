@@ -35,9 +35,9 @@ def timestamp(value: datetime) -> str:
 
 
 def clock(value: float | None = None) -> str:
-    """Wall-clock 'HH:MM' used for the 'updated at' line."""
+    """Local 'mm-dd HH:MM:SS' used for the 'updated at' line."""
     moment = datetime.fromtimestamp(value) if value is not None else datetime.now()
-    return moment.strftime("%H:%M")
+    return moment.strftime("%m-%d %H:%M:%S")
 
 
 def money(amount: float, decimals: int = 2) -> str:

@@ -46,8 +46,8 @@ class TimestampTests(unittest.TestCase):
             os.environ["LLM_METER_LANG"] = "en"
 
     def test_clock_from_epoch(self):
-        moment = datetime(2026, 7, 26, 2, 30).astimezone()
-        self.assertEqual(fmt.clock(moment.timestamp()), "02:30")
+        moment = datetime(2026, 7, 26, 2, 30, 45).astimezone()
+        self.assertEqual(fmt.clock(moment.timestamp()), "07-26 02:30:45")
 
 
 class MoneyTests(unittest.TestCase):

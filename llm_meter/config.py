@@ -24,6 +24,7 @@ DEFAULT_REFRESH_INTERVAL = 10
 @dataclass
 class Config:
     refresh_interval: int = DEFAULT_REFRESH_INTERVAL
+    provider_order: list[str] = field(default_factory=list)
     providers: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def provider(self, provider_id: str) -> dict[str, Any]:
@@ -35,6 +36,30 @@ class Config:
 
     def set_provider_enabled(self, provider_id: str, enabled: bool) -> None:
         self.provider(provider_id)["enabled"] = bool(enabled)
+
+    def ordered_provider_ids(self, known_ids: list[str]) -> list[str]:
+        """Saved order first, then any newly registered ids in registry order."""
+        known = list(dict.fromkeys(known_ids))
+        known_set = set(known)
+        ordered = [provider_id for provider_id in self.provider_order if provider_id in known_set]
+        for provider_id in known:
+            if provider_id not in ordered:
+                ordered.append(provider_id)
+        return ordered
+
+    def move_provider(self, provider_id: str, delta: int, known_ids: list[str]) -> bool:
+        """Swap ``provider_id`` with its neighbour. Returns False if it cannot move."""
+        order = self.ordered_provider_ids(known_ids)
+        try:
+            index = order.index(provider_id)
+        except ValueError:
+            return False
+        target = index + delta
+        if target < 0 or target >= len(order):
+            return False
+        order[index], order[target] = order[target], order[index]
+        self.provider_order = order
+        return True
 
 
 def config_dir() -> str:
@@ -73,7 +98,18 @@ def load_config() -> Config:
             if isinstance(key, str) and isinstance(value, dict):
                 providers[key] = value
 
-    return Config(refresh_interval=interval, providers=providers)
+    provider_order: list[str] = []
+    raw_order = data.get("provider_order")
+    if isinstance(raw_order, list):
+        for item in raw_order:
+            if isinstance(item, str) and item and item not in provider_order:
+                provider_order.append(item)
+
+    return Config(
+        refresh_interval=interval,
+        provider_order=provider_order,
+        providers=providers,
+    )
 
 
 def save_config(cfg: Config) -> None:
@@ -82,7 +118,11 @@ def save_config(cfg: Config) -> None:
     Serialized, because provider workers save from their own threads.
     """
     path = config_path()
-    payload = {"refresh_interval": cfg.refresh_interval, "providers": cfg.providers}
+    payload = {
+        "refresh_interval": cfg.refresh_interval,
+        "provider_order": cfg.provider_order,
+        "providers": cfg.providers,
+    }
     temp_path = path + ".tmp"
     with _write_lock:
         descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

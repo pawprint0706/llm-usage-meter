@@ -3,12 +3,13 @@
 import os
 import time
 import unittest
+from typing import Optional
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QGuiApplication
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget
 
 from tests._support import FakeUi, install_keyring_stub
 from tests.test_providers import codex_usage, console
@@ -69,7 +70,9 @@ class PopupTestCase(unittest.TestCase):
         self.addCleanup(self.popup.deleteLater)
 
     def make_ready(self):
-        codex, opencode = self.providers
+        by_id = {provider.id: provider for provider in self.providers}
+        codex = by_id["codex"]
+        opencode = by_id["opencode"]
         codex.data = codex_usage()
         codex.snapshot = codex.render(codex.data)
         opencode.data = Loaded(console=console(), monotonic=time.monotonic())
@@ -84,16 +87,38 @@ class PopupTestCase(unittest.TestCase):
     def cards(self) -> list[ProviderCard]:
         return self.popup.findChildren(ProviderCard)
 
+    def tabs(self) -> Optional[QTabWidget]:
+        return self.popup.findChild(QTabWidget)
+
 
 class ContentTests(PopupTestCase):
-    def test_one_card_per_enabled_service(self):
+    def test_one_tab_per_enabled_service(self):
         self.make_ready()
 
         self.popup.rebuild()
 
+        tabs = self.tabs()
+        self.assertIsNotNone(tabs)
+        self.assertEqual(tabs.count(), 2)
+        self.assertEqual(self.popup._tab_ids, ["codex", "opencode"])
+        self.assertEqual(
+            [tabs.tabToolTip(i) for i in range(tabs.count())], ["Codex", "OpenCode"]
+        )
         self.assertEqual(len(self.cards()), 2)
-        self.assertIn("Codex", self.labels())
-        self.assertIn("OpenCode", self.labels())
+
+    def test_tab_order_follows_the_saved_provider_order(self):
+        self.cfg.provider_order = ["opencode", "codex"]
+        self.providers[:] = build_providers(self.cfg, self.ui)
+        self.host.providers = self.providers
+        self.make_ready()
+
+        self.popup.rebuild()
+
+        self.assertEqual(self.popup._tab_ids, ["opencode", "codex"])
+        self.assertEqual(
+            [self.tabs().tabToolTip(i) for i in range(self.tabs().count())],
+            ["OpenCode", "Codex"],
+        )
 
     def test_a_disabled_service_is_left_out(self):
         self.make_ready()
@@ -101,8 +126,11 @@ class ContentTests(PopupTestCase):
 
         self.popup.rebuild()
 
+        tabs = self.tabs()
+        self.assertEqual(tabs.count(), 1)
+        self.assertEqual(self.popup._tab_ids, ["opencode"])
+        self.assertEqual(tabs.tabToolTip(0), "OpenCode")
         self.assertEqual(len(self.cards()), 1)
-        self.assertNotIn("Codex", self.labels())
 
     def test_every_section_is_rendered(self):
         self.make_ready()
@@ -111,6 +139,17 @@ class ContentTests(PopupTestCase):
 
         for title in ("Plan usage", "Credits", "Zen credits", "Go plan usage"):
             self.assertIn(title, self.labels())
+
+    def test_switching_tabs_keeps_the_selection_across_rebuilds(self):
+        self.make_ready()
+        self.popup.rebuild()
+        tabs = self.tabs()
+        tabs.setCurrentIndex(1)
+
+        self.popup.rebuild()
+
+        self.assertEqual(self.tabs().currentIndex(), 1)
+        self.assertEqual(self.popup._selected_provider_id, "opencode")
 
     def test_a_signed_out_service_offers_its_sign_in_action(self):
         self.popup.rebuild()
@@ -134,6 +173,7 @@ class ContentTests(PopupTestCase):
 
         self.popup.rebuild()
 
+        self.assertIsNone(self.tabs())
         self.assertIn("Enable at least one service in settings", self.labels())
 
     def test_section_titles_are_plain_labels(self):
@@ -148,6 +188,35 @@ class ContentTests(PopupTestCase):
         self.assertFalse(hasattr(title, "clicked"))
         self.assertNotIn("↗", self.labels())
 
+    def test_quitting_lives_in_the_settings_menu_only(self):
+        self.make_ready()
+
+        self.popup.rebuild()
+
+        self.assertNotIn("Quit", self.labels())
+        self.assertNotIn("종료", self.labels())
+
+    def test_the_updated_stamp_sits_next_to_the_title(self):
+        self.make_ready()
+
+        self.popup.rebuild()
+
+        labels = self.labels()
+        title = "LLM usage" if "LLM usage" in labels else "LLM 사용량"
+        stamp = next(text for text in labels if "Updated" in text or "업데이트" in text)
+        self.assertLess(labels.index(title), labels.index(stamp))
+
+    def test_the_active_tab_is_shorter_than_both_cards_stacked(self):
+        self.make_ready()
+        self.popup.rebuild()
+        tabbed = self.popup.height()
+
+        # Approximate the old stacked height from the two cards alone.
+        cards = self.cards()
+        stacked = sum(card.sizeHint().height() for card in cards) + 40
+
+        self.assertLess(tabbed, stacked)
+
 
 class SizeTests(PopupTestCase):
     def test_the_panel_grows_to_fit_its_cards(self):
@@ -159,7 +228,7 @@ class SizeTests(PopupTestCase):
 
     def test_rebuilding_a_visible_popup_keeps_the_cards_and_the_height(self):
         """Regression: widgets added to a visible layout used to measure as hidden,
-        collapsing the panel to its header and footer."""
+        collapsing the panel to its header."""
         self.make_ready()
         self.popup.show_near(QRect(600, 0, 24, 24))
         self.addCleanup(self.popup.hide)
@@ -169,6 +238,21 @@ class SizeTests(PopupTestCase):
 
         self.assertEqual(len(self.cards()), 2)
         self.assertEqual(self.popup.height(), tall)
+
+    def test_returning_to_a_shorter_tab_does_not_leave_a_taller_panel(self):
+        """Regression: the stacked pages kept the tallest tab's height, so coming
+        back to a short tab left a gap below the card."""
+        self.make_ready()
+        self.popup.show_near(QRect(600, 0, 24, 24))
+        self.addCleanup(self.popup.hide)
+        codex_height = self.popup.height()
+
+        self.tabs().setCurrentIndex(1)
+        opencode_height = self.popup.height()
+        self.tabs().setCurrentIndex(0)
+
+        self.assertGreater(opencode_height, codex_height)
+        self.assertEqual(self.popup.height(), codex_height)
 
     def test_a_signed_out_panel_is_smaller_than_a_full_one(self):
         self.popup.rebuild()

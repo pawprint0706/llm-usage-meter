@@ -1,6 +1,7 @@
 """Provider registry.
 
-Order here is the order the cards appear in the popup.
+``PROVIDER_CLASSES`` is the default tab order; the user's ``provider_order``
+setting can rearrange it.
 """
 
 from ..config import Config
@@ -31,9 +32,19 @@ __all__ = [
     "Snapshot",
     "State",
     "PROVIDER_CLASSES",
+    "known_provider_ids",
     "build_providers",
 ]
 
 
+def known_provider_ids() -> list[str]:
+    return [cls.id for cls in PROVIDER_CLASSES]
+
+
 def build_providers(cfg: Config, ui: ProviderUi) -> list[Provider]:
-    return [cls(cfg, ui) for cls in PROVIDER_CLASSES]
+    instances = {cls.id: cls(cfg, ui) for cls in PROVIDER_CLASSES}
+    return [
+        instances[provider_id]
+        for provider_id in cfg.ordered_provider_ids(known_provider_ids())
+        if provider_id in instances
+    ]

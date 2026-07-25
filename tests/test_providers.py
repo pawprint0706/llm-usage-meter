@@ -58,6 +58,13 @@ class RegistryTests(unittest.TestCase):
         self.assertEqual([provider.id for provider in providers], ["codex", "opencode"])
         self.assertTrue(all(provider.enabled for provider in providers))
 
+    def test_a_saved_order_is_honoured(self):
+        cfg = Config(provider_order=["opencode", "codex"])
+
+        providers = build_providers(cfg, FakeUi())
+
+        self.assertEqual([provider.id for provider in providers], ["opencode", "codex"])
+
     def test_a_disabled_service_reports_itself_as_such(self):
         cfg = Config()
         cfg.set_provider_enabled("codex", False)

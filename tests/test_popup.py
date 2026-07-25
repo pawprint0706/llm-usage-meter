@@ -229,6 +229,19 @@ class SizeTests(PopupTestCase):
 
         self.assertGreater(self.popup.height(), 300)
 
+    def test_show_near_remeasures_after_the_window_is_mapped(self):
+        """Regression: the first paint used an unmapped tab-bar height, so the
+        panel flashed with wrong margins until the next open."""
+        self.make_ready()
+        self.popup.show_near(QRect(600, 0, 24, 24))
+        self.addCleanup(self.popup.hide)
+        first = self.popup.height()
+
+        QApplication.processEvents()
+
+        self.assertEqual(self.popup.height(), first)
+        self.assertGreater(self.popup.height(), 300)
+
     def test_rebuilding_a_visible_popup_keeps_the_cards_and_the_height(self):
         """Regression: widgets added to a visible layout used to measure as hidden,
         collapsing the panel to its header."""

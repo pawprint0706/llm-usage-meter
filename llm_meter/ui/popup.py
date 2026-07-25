@@ -1,10 +1,11 @@
 """The panel that opens next to the tray icon."""
 
 import logging
+import time
 from contextlib import contextmanager
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QRect, QSize, Qt
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -12,6 +13,7 @@ from PySide6.QtGui import (
     QFontMetrics,
     QGuiApplication,
     QIcon,
+    QMouseEvent,
     QPainter,
     QPixmap,
 )
@@ -55,6 +57,9 @@ TAB_BAR_MARGIN_RIGHT = 10
 HEADER_ACTION_SIZE = 16
 HEADER_ACTION_GAP = 12
 PANEL_MARGIN = 12
+# Swallow outside presses briefly after open so the tray click that spawned
+# this Qt.Popup cannot dismiss it on the same interaction.
+OUTSIDE_CLICK_GUARD_MS = 300
 
 
 class _ProviderTabBar(QTabBar):
@@ -159,6 +164,7 @@ class PopupWindow(QWidget):
         self._menu_depth = 0
         self._selected_provider_id: Optional[str] = None
         self._tab_ids: list[str] = []
+        self._ignore_outside_until = 0.0
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(PANEL_WIDTH + 2 * SHADOW_MARGIN)
         self._hooks = CardHooks(
@@ -495,9 +501,49 @@ class PopupWindow(QWidget):
             self._anchor = QRect(position.x(), position.y(), 1, 1)
         self.rebuild()
         self._place()
+        self._arm_outside_click_guard()
         self.show()
         self.raise_()
         self.activateWindow()
+        # Tab-bar geometry is unreliable until the window is mapped; remeasure next
+        # tick so the first paint does not flash with collapsed margins/height.
+        QTimer.singleShot(0, self._finish_show)
+
+    def _finish_show(self) -> None:
+        if not self.isVisible() or self._menu_depth:
+            return
+        self._resize_to_content()
+        self._place()
+
+    def _arm_outside_click_guard(self) -> None:
+        self._ignore_outside_until = time.monotonic() + OUTSIDE_CLICK_GUARD_MS / 1000.0
+        app = QApplication.instance()
+        if app is not None:
+            app.installEventFilter(self)
+
+    def _disarm_outside_click_guard(self) -> None:
+        self._ignore_outside_until = 0.0
+        app = QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+
+    def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if (
+            self.isVisible()
+            and self._ignore_outside_until
+            and time.monotonic() < self._ignore_outside_until
+            and event.type()
+            in (
+                QEvent.Type.MouseButtonPress,
+                QEvent.Type.MouseButtonRelease,
+                QEvent.Type.MouseButtonDblClick,
+            )
+            and isinstance(event, QMouseEvent)
+        ):
+            point = event.globalPosition().toPoint()
+            if not self.frameGeometry().contains(point):
+                return True
+        return super().eventFilter(watched, event)
 
     # ------------------------------------------------------------------ guards
 
@@ -520,6 +566,7 @@ class PopupWindow(QWidget):
         super().keyPressEvent(event)
 
     def hideEvent(self, event) -> None:  # noqa: N802
+        self._disarm_outside_click_guard()
         self._app.note_popup_hidden()
         super().hideEvent(event)
 

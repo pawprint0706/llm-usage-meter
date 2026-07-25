@@ -29,6 +29,11 @@ REPAINT_DEBOUNCE_MS = 60
 # A click on the tray icon first dismisses the open popup; without this window
 # the same click would immediately reopen it.
 REOPEN_GUARD_MS = 250
+# Opening a Qt.Popup during the tray click lets that same press/release land
+# "outside" the new window and auto-dismiss it. Wait until buttons are up
+# (with a short deadline so a stuck button cannot block forever).
+POPUP_SHOW_RETRY_MS = 16
+POPUP_SHOW_DEADLINE_MS = 400
 
 
 class MeterApp(QObject):
@@ -49,6 +54,8 @@ class MeterApp(QObject):
         self._tray_ink_light: Optional[bool] = None
         self._tray_percent: Optional[float] = None
         self._popup_hidden_at = 0
+        self._popup_show_deadline_ms = 0
+        self._pending_tray_rect: Optional[QRect] = None
 
         self.popup = PopupWindow(self)
         self.tray = QSystemTrayIcon()
@@ -101,6 +108,7 @@ class MeterApp(QObject):
     def start(self) -> None:
         platform_mac.hide_dock_icon()
         self.tray.show()
+        self._warm_provider_marks()
         self._run_background(autostart.refresh_if_stale)
         self.refresh_all()
 
@@ -108,11 +116,23 @@ class MeterApp(QObject):
         self._refresh_timer.stop()
         self._tick_timer.stop()
         self._theme_timer.stop()
+        self._cancel_pending_show()
         for provider in self.providers:
             provider.shutdown()
         self.popup.hide()
         self.tray.hide()
         self.qt_app.quit()
+
+    def _warm_provider_marks(self) -> None:
+        """Rasterise tab marks once so the first popup open does not hitch."""
+        from .ui.popup import TAB_ICON_SIZE
+
+        color = QColor("#000000")
+        for provider in self.providers:
+            try:
+                glyphs.provider_pixmap(provider.id, TAB_ICON_SIZE, color)
+            except Exception:
+                logger.exception("Could not warm the %s mark", provider.id)
 
     @staticmethod
     def _run_background(target, *args) -> None:
@@ -225,11 +245,34 @@ class MeterApp(QObject):
 
     def toggle_popup(self) -> None:
         if self.popup.isVisible():
+            self._cancel_pending_show()
             self.popup.hide()
             return
         if self._popup_hidden_recently():
             return
-        self.popup.show_near(self._tray_rect())
+        self._pending_tray_rect = self._tray_rect()
+        self._popup_show_deadline_ms = self._now_ms() + POPUP_SHOW_DEADLINE_MS
+        self._show_popup_when_click_settles()
+
+    def _cancel_pending_show(self) -> None:
+        self._popup_show_deadline_ms = 0
+        self._pending_tray_rect = None
+
+    def _show_popup_when_click_settles(self) -> None:
+        """Show only after the tray click finishes, so Qt.Popup is not auto-dismissed."""
+        if self._popup_show_deadline_ms == 0:
+            return
+        if self.popup.isVisible() or self._popup_hidden_recently():
+            self._cancel_pending_show()
+            return
+        buttons_down = QApplication.mouseButtons() != Qt.MouseButton.NoButton
+        timed_out = self._now_ms() >= self._popup_show_deadline_ms
+        if buttons_down and not timed_out:
+            QTimer.singleShot(POPUP_SHOW_RETRY_MS, self._show_popup_when_click_settles)
+            return
+        rect = self._pending_tray_rect
+        self._cancel_pending_show()
+        self.popup.show_near(rect)
         # Stale numbers are worse than a brief spinner, so top up on open.
         for provider in self.providers:
             if provider.enabled and provider.state is State.ERROR:

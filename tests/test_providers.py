@@ -494,7 +494,7 @@ class CursorRenderTests(unittest.TestCase):
         self.assertEqual(metrics[1].value, "$49.81")
         self.assertEqual(metrics[2].label, "On-demand")
         self.assertEqual(metrics[2].value, "Off")
-        self.assertEqual(metrics[3].value, "$20/mo")
+        self.assertEqual(len(metrics), 3)
 
     def test_badge_and_gauge_follow_the_plan(self):
         snapshot = self.render()

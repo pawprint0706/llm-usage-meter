@@ -223,15 +223,6 @@ class CursorProvider(Provider):
                 )
             )
 
-        if usage.plan_price:
-            metrics.append(
-                Metric(
-                    label=tr("요금제", "Plan"),
-                    value=usage.plan_price,
-                    muted=True,
-                )
-            )
-
         return Section(
             title=tr("지출", "Spending"),
             metrics=metrics or [

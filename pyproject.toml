@@ -1,0 +1,25 @@
+[project]
+name = "llm-usage-meter"
+version = "1.0.0"
+description = "Tray meter for Codex and OpenCode usage, credits and limits"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6-Essentials>=6.7.0",
+    "keyring>=25.0.0",
+    "requests>=2.31.0",
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+llm-usage-meter = "llm_meter.__main__:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["llm_meter*"]
+
+[tool.setuptools.data-files]
+"share/llm-usage-meter" = ["assets/codex-blossom.ico"]

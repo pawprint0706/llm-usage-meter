@@ -1,0 +1,6 @@
+PySide6-Essentials>=6.7.0
+keyring>=25.0.0
+requests>=2.31.0
+
+# macOS only: menu-bar-only mode, native notifications, locale detection.
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"

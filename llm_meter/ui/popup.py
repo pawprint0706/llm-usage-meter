@@ -49,7 +49,6 @@ class PopupWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFixedWidth(PANEL_WIDTH + 2 * SHADOW_MARGIN)
         self._hooks = CardHooks(
-            open_url=self._app.open_url,
             run_entry=self._app.run_entry,
             menu_guard=self.menu_guard,
         )

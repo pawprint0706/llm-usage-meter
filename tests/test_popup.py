@@ -136,16 +136,17 @@ class ContentTests(PopupTestCase):
 
         self.assertIn("Enable at least one service in settings", self.labels())
 
-    def test_a_section_title_links_to_its_page(self):
+    def test_section_titles_are_plain_labels(self):
+        """Page links live in the ⋯ menu; titles must not be clickable."""
         self.make_ready()
         self.popup.rebuild()
 
-        link = next(
+        title = next(
             label for label in self.popup.findChildren(QLabel) if label.text() == "Plan usage"
         )
-        link.clicked.emit()
 
-        self.assertEqual(self.host.opened, ["https://chatgpt.com/#settings/Usage"])
+        self.assertFalse(hasattr(title, "clicked"))
+        self.assertNotIn("↗", self.labels())
 
 
 class SizeTests(PopupTestCase):

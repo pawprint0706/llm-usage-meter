@@ -291,18 +291,20 @@ class OpenCodeProvider(Provider):
                 background=False,
             ),
             MenuEntry.sep(),
-            MenuEntry(
-                label=tr("클립보드에서 세션 키 붙여넣기", "Paste session key from clipboard"),
-                run=self._paste_session_key,
-                background=False,
-            ),
-            self.primary_action(),
         ]
         if self.is_authenticated():
-            entries.append(MenuEntry.sep())
             entries.append(
                 MenuEntry(label=tr("로그아웃", "Sign out"), run=self._sign_out, background=False)
             )
+        else:
+            entries.append(
+                MenuEntry(
+                    label=tr("클립보드에서 세션 키 붙여넣기", "Paste session key from clipboard"),
+                    run=self._paste_session_key,
+                    background=False,
+                )
+            )
+            entries.append(self.primary_action())
         return entries
 
     def primary_action(self) -> MenuEntry:

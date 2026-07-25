@@ -35,7 +35,6 @@ class CardHooks:
     refresh cannot delete the widgets the menu is anchored to.
     """
 
-    open_url: Callable[[str], None]
     run_entry: Callable[[MenuEntry], None]
     menu_guard: Callable[[], ContextManager] = field(default=lambda: nullcontext())
 
@@ -155,13 +154,12 @@ class MetricView(QWidget):
 
 
 class SectionView(QWidget):
-    """A titled metric group; the title links to the matching web page."""
+    """A titled metric group. Page links live in the card's ⋯ menu, not here."""
 
     def __init__(
         self,
         section: Section,
         palette: Palette,
-        open_url: Callable[[str], None],
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
@@ -172,20 +170,9 @@ class SectionView(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(4)
-        if section.url:
-            title = LinkLabel(section.title, palette.subtle, self)
-            title.setFont(_font(self, -2, QFont.Weight.DemiBold))
-            title.clicked.connect(lambda url=section.url: open_url(url))
-            title.setToolTip(section.url)
-            header.addWidget(title)
-            arrow = LinkLabel("↗", palette.faint, self)
-            arrow.setFont(_font(self, -3))
-            arrow.clicked.connect(lambda url=section.url: open_url(url))
-            header.addWidget(arrow)
-        else:
-            header.addWidget(
-                _label(self, section.title, palette.subtle, -2, QFont.Weight.DemiBold)
-            )
+        header.addWidget(
+            _label(self, section.title, palette.subtle, -2, QFont.Weight.DemiBold)
+        )
         header.addStretch(1)
         layout.addLayout(header)
 
@@ -223,7 +210,7 @@ class ProviderCard(QFrame):
             layout.addWidget(self._sign_in_block(provider, palette))
         else:
             for section in provider.sections:
-                layout.addWidget(SectionView(section, palette, hooks.open_url, self))
+                layout.addWidget(SectionView(section, palette, self))
             if provider.message:
                 color = palette.danger if provider.state is State.ERROR else palette.faint
                 layout.addWidget(_label(self, provider.message, color, -2, wrap=True))

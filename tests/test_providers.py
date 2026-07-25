@@ -313,12 +313,17 @@ class OpenCodeSessionTests(unittest.TestCase):
         self.ui = FakeUi()
         self.provider = OpenCodeProvider(Config(), self.ui)
         self.saved: list[str] = []
+        # Nothing here may touch the real credential store or config file, and the
+        # card must start signed out however the developer's keychain looks.
         for patcher in (
+            patch(
+                "llm_meter.providers.opencode.provider.auth.load_session_key",
+                return_value=None,
+            ),
             patch(
                 "llm_meter.providers.opencode.provider.auth.save_session_key",
                 side_effect=self.saved.append,
             ),
-            # Nothing here should touch the real credential store or config file.
             patch("llm_meter.providers.opencode.provider.config_module.save_config"),
         ):
             patcher.start()
@@ -326,6 +331,23 @@ class OpenCodeSessionTests(unittest.TestCase):
 
     def entry(self, label: str):
         return next(item for item in self.provider.menu() if item.label == label)
+
+    def test_a_signed_out_card_offers_both_ways_to_add_a_key(self):
+        labels = [entry.label for entry in self.provider.menu()]
+
+        self.assertIn("Paste session key from clipboard", labels)
+        self.assertIn("Enter session key...", labels)
+        self.assertNotIn("Sign out", labels)
+
+    def test_a_signed_in_card_hides_the_session_key_entries(self):
+        self.ui.answer = "s" * 40
+        self.provider.primary_action().run()
+
+        labels = [entry.label for entry in self.provider.menu()]
+
+        self.assertNotIn("Paste session key from clipboard", labels)
+        self.assertNotIn("Enter session key...", labels)
+        self.assertIn("Sign out", labels)
 
     def test_pasting_a_cookie_value_stores_the_key_and_refreshes(self):
         self.ui.clipboard = "auth=" + "k" * 40 + ";"

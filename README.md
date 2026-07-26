@@ -9,7 +9,22 @@
 
 Cursor AI 등 다른 서비스는 provider 패키지를 추가하는 방식으로 확장합니다([서비스 추가](#서비스-추가) 참고).
 
-## 설치
+## 설치 (권장: 단독 바이너리)
+
+Python을 설치할 필요 없습니다. [Releases](https://github.com/pawprint0706/llm-usage-meter/releases)에서 OS에 맞는 zip을 받아 압축을 풀면 됩니다.
+
+| 플랫폼 | 아티팩트 | 실행 |
+| --- | --- | --- |
+| macOS (Apple Silicon) | `llm-usage-meter-macos-arm64.zip` | `LLM Usage Meter.app`을 Applications 등으로 옮긴 뒤 실행 |
+| macOS (Intel) | `llm-usage-meter-macos-x64.zip` | 위와 동일 |
+| Windows | `llm-usage-meter-windows-x64.zip` | `llm-usage-meter.exe` 더블클릭 |
+| Linux | `llm-usage-meter-linux-x64.zip` | `chmod +x llm-usage-meter && ./llm-usage-meter` |
+
+macOS에서 처음 열 때 Gatekeeper 경고가 나오면 **시스템 설정 → 개인정보 보호 및 보안**에서 허용하거나, 우클릭 → 열기를 사용하세요. (현재 릴리스는 공증되지 않은 빌드입니다.)
+
+로그는 `~/.llm-usage-meter/app.log` (Windows: `%USERPROFILE%\.llm-usage-meter\app.log`)에 기록됩니다.
+
+### 소스에서 실행 (개발용)
 
 Python 3.10+ 필요. 저장소 폴더에서:
 
@@ -19,17 +34,9 @@ Python 3.10+ 필요. 저장소 폴더에서:
 
 설치 스크립트는 프로젝트 안에 `.venv` 가상 환경을 만들고 필요한 패키지를 설치합니다. 실행 중인 인스턴스가 있으면 먼저 중지하므로, 업데이트할 때도 같은 스크립트를 실행하면 됩니다.
 
-## 실행
+이후 다시 실행할 때는 `run.command` / `run.bat` / `./run.sh`를 사용합니다. 실행 스크립트는 앱을 터미널에서 **분리(detach)** 해서 띄우므로 터미널 창을 닫아도 앱은 계속 동작합니다.
 
-설치가 끝나면 앱이 자동으로 시작됩니다. 이후 다시 실행할 때는:
-
-- **macOS**: `run.command` 더블클릭 (터미널에서는 `./run.sh`)
-- **Windows**: `run.bat` 더블클릭
-- **Linux**: `./run.sh`
-
-실행 스크립트는 앱을 터미널에서 **분리(detach)** 해서 띄우므로 터미널 창을 닫아도 앱은 계속 동작합니다. 로그는 `~/.llm-usage-meter/app.log` (Windows: `%USERPROFILE%\.llm-usage-meter\app.log`)에 기록됩니다.
-
-터미널에 붙여서 디버그하려면 직접 실행하세요.
+터미널에 붙여서 디버그하려면:
 
 ```sh
 .venv/bin/python -m llm_meter          # Windows: .venv\Scripts\python.exe -m llm_meter
@@ -174,20 +181,46 @@ Codex OAuth 토큰과 OpenCode 세션 키는 OS 보안 저장소에 보관합니
 설정 메뉴의 **로그인 시 자동 시작**을 켜면 OS 로그인 시 앱이 실행됩니다.
 
 - macOS: `~/Library/LaunchAgents/local.llm-usage-meter.plist` (LaunchAgent)
-- Windows: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (pythonw로 콘솔 창 없이 실행)
+- Windows: `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (단독 exe 또는 pythonw, 콘솔 창 없음)
 - Linux: `~/.config/autostart/llm-usage-meter.desktop`
 
-등록 정보에는 절대 경로가 들어가므로 프로젝트 폴더를 옮기면 다음 실행 때 경로를 갱신합니다. 중복 실행은 잠금 파일로 차단되며, 자동 시작된 상태에서 실행 스크립트를 다시 실행하면 기존 인스턴스를 교체하므로 트레이 아이콘이 두 개 생기지 않습니다.
+등록 정보에는 절대 경로가 들어가므로 바이너리·프로젝트 폴더를 옮기면 다음 실행 때 경로를 갱신합니다. 중복 실행은 잠금 파일로 차단되며, 이미 떠 있는 상태에서 다시 실행하면 기존 인스턴스를 교체하므로 트레이 아이콘이 두 개 생기지 않습니다.
+
+## 단독 바이너리 빌드
+
+플랫폼별로 그 OS에서만 빌드할 수 있습니다(크로스 컴파일 불가). 태그 `v*`를 push하면 GitHub Actions가 macOS arm64/x64, Windows, Linux 아티팩트를 만들고 Release에 올립니다. 로컬에서는:
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/pip install -e ".[packaging]"   # 또는: pip install 'pyinstaller>=6.0'
+.venv/bin/python packaging/build.py --clean
+```
+
+결과물은 `dist/` 아래입니다 (`LLM Usage Meter.app` 또는 `llm-usage-meter` / `.exe`).
 
 ## 삭제
 
-삭제 스크립트는 실행 전에 확인을 묻고, 앱을 중지한 뒤 자동 시작 등록·OS credential 저장소의 로그인·데이터 폴더(`~/.llm-usage-meter`)·`.venv`를 제거합니다.
+단독 바이너리로 설치한 경우:
+
+```sh
+# macOS
+"/Applications/LLM Usage Meter.app/Contents/MacOS/llm-usage-meter" --uninstall
+
+# Windows (PowerShell / cmd)
+llm-usage-meter.exe --uninstall
+
+# Linux
+./llm-usage-meter --uninstall
+```
+
+소스 설치라면 삭제 스크립트가 실행 전에 확인을 묻고, 앱을 중지한 뒤 자동 시작 등록·OS credential 저장소의 로그인·데이터 폴더(`~/.llm-usage-meter`)·`.venv`를 제거합니다.
 
 - **macOS**: `uninstall.command` 더블클릭 (터미널에서는 `./uninstall.sh`)
 - **Windows**: `uninstall.bat` 더블클릭
 - **Linux**: `./uninstall.sh`
 
-프로젝트 폴더 자체는 남으니 완전히 지우려면 삭제 후 폴더를 직접 지우세요.
+프로젝트 폴더 자체는 남으니 완전히 지우려면 삭제 후 폴더를 직접 지우세요. 단독 `.app` / `.exe`는 직접 지우면 됩니다.
 
 ## 서비스 추가
 

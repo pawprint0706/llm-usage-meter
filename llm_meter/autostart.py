@@ -6,11 +6,11 @@ Per platform:
              bootstrap it immediately -- the app is already running and
              would end up with two tray icons.
   - Windows: HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run value
-             pointing at pythonw.exe + launch.py (no console window).
+             pointing at the frozen exe, or pythonw.exe + launch.py.
   - Linux:   XDG autostart .desktop file.
 
 Entries embed absolute paths, so ``refresh_if_stale()`` rewrites them at
-startup in case the project folder or the virtualenv moved.
+startup in case the binary or project folder moved.
 """
 
 import logging
@@ -18,6 +18,8 @@ import os
 import platform
 import subprocess
 import sys
+
+from . import paths
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +32,7 @@ _RUN_VALUE = "LlmUsageMeter"
 
 
 def _project_dir() -> str:
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return paths.project_dir()
 
 
 def _launcher() -> str:
@@ -47,7 +49,15 @@ def _python() -> str:
 
 
 def _command() -> list[str]:
+    if paths.frozen():
+        return [paths.executable_path()]
     return [_python(), _launcher()]
+
+
+def _workdir() -> str:
+    if paths.frozen():
+        return os.path.dirname(paths.executable_path())
+    return _project_dir()
 
 
 def _plist_path() -> str:
@@ -62,15 +72,15 @@ def _plist_dict() -> dict:
         "Label": APP_LABEL,
         "ProgramArguments": _command(),
         "RunAtLoad": True,
-        "WorkingDirectory": _project_dir(),
+        "WorkingDirectory": _workdir(),
         "StandardOutPath": log_path,
         "StandardErrorPath": log_path,
     }
 
 
 def _registry_command() -> str:
-    python, launcher = _command()
-    return f'"{python}" "{launcher}"'
+    parts = _command()
+    return " ".join(f'"{part}"' for part in parts)
 
 
 def _read_registry():
@@ -88,12 +98,13 @@ def _desktop_path() -> str:
 
 
 def _desktop_content() -> str:
-    python, launcher = _command()
+    parts = _command()
+    exec_line = " ".join(f'"{part}"' for part in parts)
     return (
         "[Desktop Entry]\n"
         "Type=Application\n"
         f"Name={APP_NAME}\n"
-        f'Exec="{python}" "{launcher}"\n'
+        f"Exec={exec_line}\n"
         "X-GNOME-Autostart-enabled=true\n"
     )
 
@@ -175,7 +186,7 @@ def toggle() -> bool:
 
 
 def refresh_if_stale() -> None:
-    """Rewrite the autostart entry if the project folder or venv moved."""
+    """Rewrite the autostart entry if the binary or project folder moved."""
     try:
         if not is_enabled():
             return

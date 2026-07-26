@@ -65,15 +65,27 @@ class CodexProvider(Provider):
         super().__init__(cfg, ui)
         self._login_in_progress = False
         self.device_code: Optional[str] = None
+        self._credentials: Optional[auth.Credentials] = None
+        self._credentials_loaded = False
 
     # ------------------------------------------------------------------ auth
 
+    def _load_credentials(self) -> Optional[auth.Credentials]:
+        if not self._credentials_loaded:
+            try:
+                self._credentials = auth.load_credentials()
+            except auth.AuthError as exc:
+                logger.warning("Codex credential check failed: %s", exc)
+                self._credentials = None
+            self._credentials_loaded = True
+        return self._credentials
+
+    def _invalidate_credentials_cache(self) -> None:
+        self._credentials = None
+        self._credentials_loaded = False
+
     def is_authenticated(self) -> bool:
-        try:
-            return auth.load_credentials() is not None
-        except auth.AuthError as exc:
-            logger.warning("Codex credential check failed: %s", exc)
-            return False
+        return self._load_credentials() is not None
 
     def signed_out_hint(self) -> str:
         return tr("OpenAI 계정으로 로그인하세요", "Sign in with your OpenAI account")
@@ -219,6 +231,7 @@ class CodexProvider(Provider):
         except auth.AuthError as exc:
             self.set_message(str(exc))
             return
+        self._invalidate_credentials_cache()
         self.device_code = None
         self.reset(tr("로그아웃됨", "Signed out"))
 
@@ -240,6 +253,7 @@ class CodexProvider(Provider):
         finally:
             self._login_in_progress = False
             self.device_code = None
+        self._invalidate_credentials_cache()
         self.set_message(tr("로그인됨", "Signed in"))
         self.ui.request_refresh(self)
 

@@ -12,10 +12,12 @@ ACCOUNT = "codex-credentials"
 
 class KeystoreTests(unittest.TestCase):
     def setUp(self):
+        keystore.clear_cache()
         self.fake = FakeKeyring()
         patcher = patch.object(keystore, "keyring", self.fake)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(keystore.clear_cache)
 
     def entries_for(self, prefix: str) -> list[str]:
         return [service for service, _ in self.fake.entries if service.startswith(prefix)]
@@ -79,6 +81,7 @@ class KeystoreTests(unittest.TestCase):
             keystore.set(ACCOUNT, "".join(f"{index:07d}-payload-" for index in range(400)))
             chunk = next(iter(self.entries_for(f"{keystore.SERVICE} {ACCOUNT}")))
             del self.fake.entries[(chunk, ACCOUNT)]
+            keystore.clear_cache()
 
             with self.assertRaises(keystore.KeystoreError):
                 keystore.get(ACCOUNT)
@@ -107,6 +110,7 @@ class KeystoreTests(unittest.TestCase):
         self.assertTrue(
             self.fake.get_password(keystore.SERVICE, ACCOUNT).startswith("m1:")
         )
+        keystore.clear_cache()  # next launch must re-read the chunked item
 
         with patch.object(keystore, "_chunking_enabled", return_value=False):
             self.assertEqual(keystore.get(ACCOUNT), secret)
@@ -114,6 +118,46 @@ class KeystoreTests(unittest.TestCase):
         stored = self.fake.get_password(keystore.SERVICE, ACCOUNT)
         self.assertTrue(stored.startswith("z1:"))
         self.assertEqual(self.entries_for(f"{keystore.SERVICE} {ACCOUNT}"), [])
+
+    def test_successful_reads_are_cached(self):
+        keystore.set(ACCOUNT, "once")
+        self.fake.get_password = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("keyring should not be consulted again")
+        )
+
+        self.assertEqual(keystore.get(ACCOUNT), "once")
+
+    def test_access_denial_is_latched_for_the_session(self):
+        calls = {"n": 0}
+
+        def deny(*_args, **_kwargs):
+            calls["n"] += 1
+            raise RuntimeError("Can't get password from keychain: (-128, 'Keychain Access Denied')")
+
+        self.fake.get_password = deny
+
+        with self.assertRaises(keystore.KeystoreError):
+            keystore.get(ACCOUNT)
+        with self.assertRaises(keystore.KeystoreError) as ctx:
+            keystore.get(ACCOUNT)
+
+        self.assertEqual(calls["n"], 1)
+        self.assertIn("denied earlier", str(ctx.exception))
+
+    def test_set_outside_windows_does_not_pre_read(self):
+        calls = {"n": 0}
+        real_get = self.fake.get_password
+
+        def counting_get(*args, **kwargs):
+            calls["n"] += 1
+            return real_get(*args, **kwargs)
+
+        self.fake.get_password = counting_get
+        with patch.object(keystore, "_chunking_enabled", return_value=False):
+            keystore.set(ACCOUNT, "fresh")
+
+        self.assertEqual(calls["n"], 0)
+        self.assertEqual(keystore.get(ACCOUNT), "fresh")
 
 
 if __name__ == "__main__":

@@ -28,10 +28,12 @@ def session_jwt(user: str = "user_01ABC", prefix: str | None = "auth0") -> str:
 
 class StoreBackedTestCase(unittest.TestCase):
     def setUp(self):
+        keystore.clear_cache()
         self.fake = FakeKeyring()
         patcher = patch.object(keystore, "keyring", self.fake)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(keystore.clear_cache)
 
 
 class CleanSessionTokenTests(unittest.TestCase):

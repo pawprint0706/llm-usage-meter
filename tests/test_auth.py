@@ -34,10 +34,12 @@ def credentials(**overrides) -> codex_auth.Credentials:
 
 class StoreBackedTestCase(unittest.TestCase):
     def setUp(self):
+        keystore.clear_cache()
         self.fake = FakeKeyring()
         patcher = patch.object(keystore, "keyring", self.fake)
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(keystore.clear_cache)
 
 
 class CodexCredentialTests(StoreBackedTestCase):

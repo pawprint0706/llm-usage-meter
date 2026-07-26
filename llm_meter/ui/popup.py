@@ -46,13 +46,15 @@ SHADOW_MARGIN = 10
 GAP_FROM_TRAY = 2
 MAX_HEIGHT_FRACTION = 0.82
 TAB_ICON_SIZE = 14
-TAB_TO_CARD_GAP = 12
+# Clearance from the logo/title to the header above and the card below.
+# Baked into the tab label pixmap so Qt style padding cannot inflate it.
+TAB_PAD_Y = 12
+TAB_TO_CARD_GAP = 0
 TAB_ICON_TEXT_GAP = 6
-# No pad past the composed label so the underline ends on the last glyph.
+# No pad past the composed label; selection is ink weight only.
 TAB_LABEL_RIGHT_PAD = 0
 # Must match QTabBar::tab margin-right; Qt takes margin out of the painted
-# tab (and its underline), so sizeHint has to include it or the bar clips
-# the title.
+# tab, so sizeHint has to include it or the bar clips the title.
 TAB_BAR_MARGIN_RIGHT = 10
 HEADER_ACTION_SIZE = 16
 HEADER_ACTION_GAP = 12
@@ -63,16 +65,16 @@ OUTSIDE_CLICK_GUARD_MS = 300
 
 
 class _ProviderTabBar(QTabBar):
-    """Size each tab to its composed label so the underline doesn't overshoot."""
+    """Size each tab to its composed label so neighbours don't crowd the title."""
 
     def tabSizeHint(self, index: int) -> QSize:
-        base = super().tabSizeHint(index)
         button = self.tabButton(index, QTabBar.ButtonPosition.LeftSide)
         if button is None:
-            return base
+            return super().tabSizeHint(index)
+        size = button.sizeHint()
         return QSize(
-            button.sizeHint().width() + TAB_LABEL_RIGHT_PAD + TAB_BAR_MARGIN_RIGHT,
-            base.height(),
+            size.width() + TAB_LABEL_RIGHT_PAD + TAB_BAR_MARGIN_RIGHT,
+            size.height(),
         )
 
 
@@ -200,7 +202,6 @@ class PopupWindow(QWidget):
         self._header.setContentsMargins(0, 0, 0, 0)
         self._header.setSpacing(8)
         panel_layout.addLayout(self._header)
-        panel_layout.addSpacing(4)
 
         self._scroll = QScrollArea(self._panel)
         self._scroll.setWidgetResizable(True)
@@ -256,11 +257,9 @@ class PopupWindow(QWidget):
             f" {{ background: transparent; }}"
             f"QTabWidget::pane {{ border: none; background: transparent; top: 0; margin: 0; padding: 0; }}"
             f"QTabBar::tab {{ background: transparent; color: {palette.faint};"
-            f" border: none; border-bottom: 2px solid transparent;"
-            f" padding: 6px 0 8px 0; margin: 0 {TAB_BAR_MARGIN_RIGHT}px 0 0; min-height: 24px; }}"
+            f" border: none; padding: 0; margin: 0 {TAB_BAR_MARGIN_RIGHT}px 0 0; }}"
             f"QTabBar::tab:hover {{ color: {palette.subtle}; }}"
-            f"QTabBar::tab:selected {{ color: {palette.text};"
-            f" border-bottom: 2px solid {palette.text}; }}"
+            f"QTabBar::tab:selected {{ color: {palette.text}; }}"
             f"QTabBar::tab:disabled {{ color: {palette.faint}; }}"
         )
         self._scroll.viewport().setStyleSheet("background: transparent;")
@@ -354,12 +353,17 @@ class PopupWindow(QWidget):
         tabs.setCurrentIndex(self._tab_ids.index(selected))
 
     def _tab_label(self, provider, palette: theme.Palette, *, selected: bool) -> QWidget:
-        """Pre-composited icon + name so the two stay vertically aligned on macOS."""
+        """Pre-composited icon + name so the two stay vertically aligned on macOS.
+
+        Vertical ``TAB_PAD_Y`` is drawn into the pixmap so the gap above/below the
+        logo is exact and not compounded by QTabBar style padding.
+        """
         color = QColor(palette.text if selected else palette.faint)
         font = _font(self._panel, -1, QFont.Weight.DemiBold if selected else QFont.Weight.Normal)
         metrics = QFontMetrics(font)
         text_width = metrics.horizontalAdvance(provider.name)
-        height = max(TAB_ICON_SIZE, metrics.height())
+        content_h = max(TAB_ICON_SIZE, metrics.height())
+        height = content_h + 2 * TAB_PAD_Y
         width = TAB_ICON_SIZE + TAB_ICON_TEXT_GAP + text_width
 
         canvas = QPixmap(width, height)
@@ -369,10 +373,10 @@ class PopupWindow(QWidget):
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         icon = glyphs.provider_pixmap(provider.id, TAB_ICON_SIZE, color)
         # Marks read slightly high next to Latin capitals; shift the glyph down 1px.
-        painter.drawPixmap(0, (height - TAB_ICON_SIZE) // 2 + 1, icon)
+        painter.drawPixmap(0, TAB_PAD_Y + (content_h - TAB_ICON_SIZE) // 2 + 1, icon)
         painter.setPen(color)
         painter.setFont(font)
-        text_y = (height + metrics.ascent() - metrics.descent()) // 2
+        text_y = TAB_PAD_Y + (content_h + metrics.ascent() - metrics.descent()) // 2
         painter.drawText(TAB_ICON_SIZE + TAB_ICON_TEXT_GAP, text_y, provider.name)
         painter.end()
 

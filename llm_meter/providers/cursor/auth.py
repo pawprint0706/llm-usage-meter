@@ -17,7 +17,6 @@ import json
 import logging
 import os
 import sqlite3
-import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Optional
@@ -184,31 +183,13 @@ def read_ide_access_token(db_path: Optional[str] = None) -> Optional[str]:
     return None
 
 
-def _read_macos_cli_token() -> Optional[str]:
-    try:
-        completed = subprocess.run(
-            [
-                "security",
-                "find-generic-password",
-                "-s",
-                CLI_KEYCHAIN_SERVICE,
-                "-w",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        logger.debug("macOS keychain read failed: %s", exc)
-        return None
-    if completed.returncode != 0:
-        return None
-    token = (completed.stdout or "").strip()
-    return token if _looks_like_jwt(token) else None
-
-
 def _read_keyring_cli_token() -> Optional[str]:
+    """Read the JWT via the keyring API (not the ``security`` CLI).
+
+    Spawning ``security find-generic-password -w`` asks Keychain on behalf of
+    ``/usr/bin/security``, which re-prompts (or hangs on recent macOS) even when
+    this app's own Python binary is already allowed. Prefer the in-process API.
+    """
     try:
         import keyring
     except ImportError:
@@ -225,10 +206,6 @@ def _read_keyring_cli_token() -> Optional[str]:
 
 def read_cli_access_token() -> Optional[str]:
     """Read the JWT written by ``cursor-agent`` / ``agent login``."""
-    if sys.platform == "darwin":
-        token = _read_macos_cli_token()
-        if token:
-            return token
     return _read_keyring_cli_token()
 
 

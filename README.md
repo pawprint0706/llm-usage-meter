@@ -6,8 +6,9 @@
 
 - **Codex** (ChatGPT) — 플랜 사용량 윈도우, 구매한 크레딧 잔액, 사용량 한도 재설정권
 - **OpenCode** — Go 플랜 사용량(5시간 / 주간 / 월간)과 Zen 크레딧 잔액을 별도 섹션으로 구분
+- **Cursor** — 청구 주기 플랜 사용량(%)과 포함·보너스·온디맨드 지출
 
-Cursor AI 등 다른 서비스는 provider 패키지를 추가하는 방식으로 확장합니다([서비스 추가](#서비스-추가) 참고).
+다른 서비스는 provider 패키지를 추가하는 방식으로 확장합니다([서비스 추가](#서비스-추가) 참고).
 
 ## 설치 (권장: 단독 바이너리)
 
@@ -141,9 +142,48 @@ OpenCode 콘솔은 공개 API가 없어 브라우저 세션 쿠키를 그대로 
 
 워크스페이스 ID는 첫 조회 때 `/auth` 리다이렉트로 찾아 설정 파일에 캐시합니다. 세션이 만료되면 저장된 키를 지우고 알림을 띄웁니다.
 
+## Cursor 카드
+
+```text
+Cursor  Pro                                    ⋯
+플랜 사용량
+  전체                                        42%
+  ▬▬▬▬▬▬▬▬▭▭▭▭▭▭▭▭▭▭▭▭   12일 4시간 후 초기화
+  자동                                        18%
+  API                                         55%
+지출
+  포함                                $8.40 / $20
+  ▬▬▬▬▬▬▬▬▭▭▭▭▭▭▭▭▭▭▭▭
+  보너스                                       $5.00
+  온디맨드                            $2.10 / $50
+```
+
+- **플랜 사용량**: 청구 주기 기준 전체·자동·API 사용률(%)과 주기 종료 카운트다운을 표시합니다. 무제한 플랜이면 전체를 **무제한**으로 표시합니다.
+- **지출**: 포함(included) 사용액/한도, 보너스 크레딧, 온디맨드(사용량 기반) 사용액/한도를 표시합니다. 온디맨드가 꺼져 있으면 **꺼짐**으로 표시합니다.
+
+사용량·지출 페이지는 `⋯` 메뉴의 **사용량 페이지 열기** / **지출 페이지 열기**로만 이동합니다.
+
+### Cursor 세션
+
+Cursor 대시보드 사용량·지출 API는 공개 OAuth가 아니라 `WorkosCursorSessionToken` 웹 세션 쿠키를 사용합니다. 앱은 Cursor 쪽 저장소를 **읽기만** 하며 다시 쓰지 않습니다. 세션 해석 순서는 다음과 같습니다.
+
+1. 환경 변수 `CURSOR_SESSION_TOKEN` (디버그·테스트용 덮어쓰기)
+2. 로컬 Cursor IDE 세션 (`state.vscdb`의 access token)
+3. `cursor-agent` / CLI 키체인에 저장된 access token
+4. 앱에 붙여넣은 세션 토큰 (OS credential 저장소)
+
+로컬 Cursor 로그인이 있으면 별도 입력 없이 바로 조회합니다. 없거나 만료된 경우에는 브라우저 쿠키를 붙여넣습니다.
+
+1. <https://cursor.com/dashboard/usage> 에서 로그인합니다.
+2. 개발자 도구(F12) → 애플리케이션/저장소 → 쿠키 → `https://cursor.com`
+3. `WorkosCursorSessionToken` 쿠키의 값을 복사합니다.
+4. 카드의 **세션 토큰 입력...** 또는 **클립보드에서 세션 토큰 붙여넣기**로 등록합니다. (`WorkosCursorSessionToken=`, 따옴표, URL 인코딩된 `::`는 자동으로 정리됩니다.)
+
+붙여넣은 토큰만 앱 credential 저장소에 보관하며, 메뉴의 **로그아웃**으로 제거할 수 있습니다. 로컬 IDE/CLI 세션을 쓰는 경우에는 로그아웃 항목이 나오지 않습니다. 세션이 만료되면 알림을 띄우고, 붙여넣은 토큰이 있으면 제거한 뒤 다시 등록하거나 Cursor에 다시 로그인하라고 안내합니다.
+
 ## 자격 증명 보안
 
-Codex OAuth 토큰과 OpenCode 세션 키는 OS 보안 저장소에 보관합니다.
+Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰은 OS 보안 저장소에 보관합니다.
 
 - **macOS**: 키체인
 - **Windows**: Windows Credential Manager
@@ -158,14 +198,15 @@ Codex OAuth 토큰과 OpenCode 세션 키는 OS 보안 저장소에 보관합니
 ```json
 {
   "refresh_interval": 10,
-  "provider_order": ["codex", "opencode"],
+  "provider_order": ["codex", "opencode", "cursor"],
   "providers": {
     "codex": { "enabled": true },
     "opencode": {
       "enabled": true,
       "workspace_id": "wrk_...",
       "limits": { "rolling": 12, "weekly": 30, "monthly": 60 }
-    }
+    },
+    "cursor": { "enabled": true }
   }
 }
 ```
@@ -247,7 +288,7 @@ Windows:
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-테스트는 Codex 사용량·크레딧·재설정권 파싱과 401/403 단일 재시도, OpenCode 콘솔 SSR 파서와 Zen 빌링 추출, 자격 증명 압축·분할 저장, 설정 파일 읽기/쓰기, 금액·기간 표시, 팝업 렌더링(오프스크린 Qt)을 검사합니다. 실제 계정이나 네트워크 호출은 사용하지 않습니다.
+테스트는 Codex 사용량·크레딧·재설정권 파싱과 401/403 단일 재시도, OpenCode 콘솔 SSR 파서와 Zen 빌링 추출, Cursor 사용량·지출 파싱과 세션 토큰 정리, 자격 증명 압축·분할 저장, 설정 파일 읽기/쓰기, 금액·기간 표시, 팝업 렌더링(오프스크린 Qt)을 검사합니다. 실제 계정이나 네트워크 호출은 사용하지 않습니다.
 
 ## 문제 해결
 
@@ -257,6 +298,8 @@ Windows:
 - **Codex 로그인이 만료됨**: 로그아웃한 뒤 다시 로그인하세요. 취소·만료·폐기된 refresh token은 복구할 수 없습니다.
 - **OpenCode 세션이 만료됨**: `auth` 쿠키를 다시 복사해 세션 키를 등록하세요. 콘솔에서 로그아웃하면 키도 무효화됩니다.
 - **OpenCode 사용량을 읽지 못함**: 콘솔 HTML 구조가 바뀐 경우입니다. 마지막 응답이 `~/.llm-usage-meter/opencode-last-fetch.html`에 저장되니 로그와 함께 확인하세요.
+- **Cursor 사용량이 비어 있음**: Cursor IDE/CLI에 로그인돼 있는지 확인하거나, `WorkosCursorSessionToken`을 다시 붙여넣으세요.
+- **Cursor 세션이 만료됨**: Cursor 웹/IDE에 다시 로그인한 뒤 앱을 새로고침하거나, 새 쿠키를 붙여넣으세요.
 - **네트워크 오류**: 로그인은 유지되며 다음 주기에 자동 재시도합니다.
 - **아이콘 색상이 배경과 맞지 않음(Windows)**: 작업 표시줄 테마를 5초마다 확인합니다. 잠시 기다리거나 앱을 다시 실행하세요.
 
@@ -269,12 +312,15 @@ GET https://chatgpt.com/backend-api/wham/usage
 GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits
 GET https://opencode.ai/workspace/<workspace>/go       (SSR HTML 파싱)
 GET https://opencode.ai/auth, /auth/status
+GET https://cursor.com/api/usage-summary
+POST https://cursor.com/api/dashboard/get-hard-limit
+POST https://cursor.com/api/dashboard/get-plan-info
 ```
 
 각 서비스는 엔드포인트, 응답 필드, 필요한 헤더, 인증 방식, 접근 정책을 예고 없이 변경하거나 제거할 수 있습니다. 로컬 설치가 그대로여도 앱이 동작하지 않을 수 있으며, 이는 이 프로젝트가 가진 본질적인 유지보수·호환성 위험입니다.
 
 ## 상표 및 비공식 앱 고지
 
-LLM Usage Meter는 독립적으로 제작된 유틸리티입니다. OpenAI 또는 OpenCode의 공식 앱이 아니며, 두 회사가 보증·후원하거나 제휴한 프로젝트가 아닙니다.
+LLM Usage Meter는 독립적으로 제작된 유틸리티입니다. OpenAI, OpenCode, Cursor의 공식 앱이 아니며, 해당 회사가 보증·후원하거나 제휴한 프로젝트가 아닙니다.
 
-ChatGPT, Codex, OpenAI, Blossom 로고와 OpenCode 관련 표장은 각 소유자의 상표 또는 자산입니다. `assets/codex-blossom.ico`는 모니터링 대상 서비스를 카드에서 식별하기 위한 목적으로만 사용하며, 단색 glyph로 비율을 유지해 크기만 조정합니다. 이 앱 자체의 브랜드로 표시하지 않습니다.
+ChatGPT, Codex, OpenAI, Blossom 로고와 OpenCode·Cursor 관련 표장은 각 소유자의 상표 또는 자산입니다. `assets/codex-blossom.ico`와 `assets/cursor-cube.svg`는 모니터링 대상 서비스를 카드에서 식별하기 위한 목적으로만 사용하며, 단색 glyph로 비율을 유지해 크기만 조정합니다. 이 앱 자체의 브랜드로 표시하지 않습니다.

@@ -17,7 +17,6 @@ Python을 설치할 필요 없습니다. [Releases](https://github.com/pawprint0
 | 플랫폼 | 아티팩트 | 실행 |
 | --- | --- | --- |
 | macOS (Apple Silicon) | `llm-usage-meter-macos-arm64.zip` | `LLM Usage Meter.app`을 Applications 등으로 옮긴 뒤 실행 |
-| macOS (Intel) | `llm-usage-meter-macos-x64.zip` | 위와 동일 |
 | Windows | `llm-usage-meter-windows-x64.zip` | `llm-usage-meter.exe` 더블클릭 |
 | Linux | `llm-usage-meter-linux-x64.zip` | `chmod +x llm-usage-meter && ./llm-usage-meter` |
 
@@ -229,7 +228,7 @@ Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰
 
 ## 단독 바이너리 빌드
 
-플랫폼별로 그 OS에서만 빌드할 수 있습니다(크로스 컴파일 불가). 태그 `v*`를 push하면 GitHub Actions가 macOS arm64/x64, Windows, Linux 아티팩트를 만들고 Release에 올립니다. 로컬에서는:
+플랫폼별로 그 OS에서만 빌드할 수 있습니다(크로스 컴파일 불가). 태그 `v*`를 push하면 GitHub Actions가 macOS arm64, Windows, Linux 아티팩트를 만들고 Release에 올립니다. 로컬에서는:
 
 ```sh
 python3 -m venv .venv

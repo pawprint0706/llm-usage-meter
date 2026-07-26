@@ -18,9 +18,6 @@ jobs:
           - os: macos-14
             artifact: "LLM Usage Meter.app"
             archive: llm-usage-meter-macos-arm64.zip
-          - os: macos-13
-            artifact: "LLM Usage Meter.app"
-            archive: llm-usage-meter-macos-x64.zip
           - os: windows-latest
             artifact: llm-usage-meter.exe
             archive: llm-usage-meter-windows-x64.zip

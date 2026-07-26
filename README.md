@@ -20,7 +20,24 @@ Python을 설치할 필요 없습니다. [Releases](https://github.com/pawprint0
 | Windows | `llm-usage-meter-windows-x64.zip` | `llm-usage-meter.exe` 더블클릭 |
 | Linux | `llm-usage-meter-linux-x64.zip` | `chmod +x llm-usage-meter && ./llm-usage-meter` |
 
-macOS에서 처음 열 때 Gatekeeper 경고가 나오면 **시스템 설정 → 개인정보 보호 및 보안**에서 허용하거나, 우클릭 → 열기를 사용하세요. (현재 릴리스는 공증되지 않은 빌드입니다.)
+현재 macOS 릴리스는 Apple 공증(notarization)이 없어, 처음 열 때 Gatekeeper가 **「‘LLM Usage Meter.app’을(를) 열지 않음」** 이라고 막을 수 있습니다. 더블클릭만으로는 **열기**가 없고 **휴지통으로 이동** / **완료**만 보이는 경우가 많습니다. 아래 중 하나로 허용하세요.
+
+**방법 1 — 시스템 설정의 「그래도 열기」**
+
+1. 앱을 한 번 열어 위 경고가 뜨게 한 뒤 **완료**로 닫습니다.
+2. **시스템 설정 → 개인정보 보호 및 보안**으로 이동합니다.
+3. 아래로 스크롤하면 LLM Usage Meter 관련 안내와 **그래도 열기**가 나타납니다.
+4. **그래도 열기**를 누르고, 확인 대화가 나오면 다시 열어 주세요.
+
+**방법 2 — 검역(quarantine) 속성 제거**
+
+본인이 GitHub Releases에서 받은 빌드라면, 터미널에서 앱 경로에 맞춰 실행한 뒤 다시 엽니다.
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/LLM Usage Meter.app"
+```
+
+앱을 Applications가 아닌 다른 폴더에 두었다면 그 경로로 바꾸면 됩니다.
 
 로그는 `~/.llm-usage-meter/app.log` (Windows: `%USERPROFILE%\.llm-usage-meter\app.log`)에 기록됩니다.
 

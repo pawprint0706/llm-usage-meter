@@ -1,9 +1,14 @@
 """Secret storage in the OS credential store (Keychain / Credential Manager).
 
-Values are compressed and, when they exceed the Windows Credential Manager
-item-size limit, split across several generation-tagged items with a manifest
-entry as the commit point. A reader therefore only ever sees the complete
-previous value or the complete new one, never a half-written mix.
+On Windows, Credential Manager caps a single item's size, so values are
+compressed and — when still too large — split across several generation-tagged
+items with a manifest entry as the commit point. A reader therefore only ever
+sees the complete previous value or the complete new one, never a half-written
+mix.
+
+On macOS / Linux the credential stores accept large items. We keep a single
+service name so Keychain does not re-prompt for a new ACL every time a token is
+refreshed (chunk service names embed a random generation id).
 """
 
 import base64
@@ -20,11 +25,16 @@ SERVICE = "LLM Usage Meter"
 
 _COMPRESSED_PREFIX = "z1:"
 _MANIFEST_PREFIX = "m1:"
+# Windows CRED_TYPE_GENERIC CredentialBlob limit is ~2560 bytes; stay under it.
 _CHUNK_SIZE = 900
 
 
 class KeystoreError(Exception):
     """The OS credential store could not be read or written."""
+
+
+def _chunking_enabled() -> bool:
+    return sys.platform == "win32"
 
 
 def _chunk_service(account: str, generation: str, index: int) -> str:
@@ -73,41 +83,66 @@ def _delete_windows_collision(account: str) -> None:
         logger.warning("Could not remove the replaced Windows credential", exc_info=True)
 
 
+def _decode(raw: str) -> str:
+    if not raw.startswith(_COMPRESSED_PREFIX):
+        return raw
+    try:
+        packed = base64.b85decode(raw[len(_COMPRESSED_PREFIX) :].encode("ascii"))
+        return zlib.decompress(packed).decode("utf-8")
+    except (ValueError, UnicodeError, zlib.error) as exc:
+        raise KeystoreError("Stored data is invalid.") from exc
+
+
+def _encode(value: str) -> str:
+    return _COMPRESSED_PREFIX + base64.b85encode(
+        zlib.compress(value.encode("utf-8"), level=9)
+    ).decode("ascii")
+
+
+def _read_raw(account: str) -> tuple[str | None, bool]:
+    """Return ``(payload_or_none, was_chunked)``."""
+    raw = keyring.get_password(SERVICE, account)
+    manifest = _manifest(raw)
+    if not manifest:
+        return raw, False
+    generation, count = manifest
+    chunks = [
+        keyring.get_password(_chunk_service(account, generation, index), account)
+        for index in range(count)
+    ]
+    if any(chunk is None for chunk in chunks):
+        raise KeystoreError("Stored data is incomplete.")
+    return "".join(chunk for chunk in chunks if chunk is not None), True
+
+
 def get(account: str) -> str | None:
     """Read a secret, or None when nothing is stored for `account`."""
     try:
-        raw = keyring.get_password(SERVICE, account)
-        manifest = _manifest(raw)
-        if manifest:
-            generation, count = manifest
-            chunks = [
-                keyring.get_password(_chunk_service(account, generation, index), account)
-                for index in range(count)
-            ]
-            if any(chunk is None for chunk in chunks):
-                raise KeystoreError("Stored data is incomplete.")
-            raw = "".join(chunk for chunk in chunks if chunk is not None)
+        raw, was_chunked = _read_raw(account)
     except KeystoreError:
         raise
     except Exception as exc:
         raise KeystoreError(f"Could not access the system credential store: {exc}") from exc
     if not raw:
         return None
-    if not raw.startswith(_COMPRESSED_PREFIX):
-        return raw
-    try:
-        packed = base64.b85decode(raw[len(_COMPRESSED_PREFIX):].encode("ascii"))
-        return zlib.decompress(packed).decode("utf-8")
-    except (ValueError, UnicodeError, zlib.error) as exc:
-        raise KeystoreError("Stored data is invalid.") from exc
+    value = _decode(raw)
+    # Legacy macOS installs may still have Windows-style chunks; fold them into
+    # one item so Keychain stops prompting for generation-tagged service names.
+    if was_chunked and not _chunking_enabled():
+        try:
+            set(account, value)
+        except KeystoreError:
+            logger.warning("Could not migrate chunked secret to a single item", exc_info=True)
+    return value
 
 
 def set(account: str, value: str) -> None:  # noqa: A001 — mirrors keyring's naming
-    packed = _COMPRESSED_PREFIX + base64.b85encode(
-        zlib.compress(value.encode("utf-8"), level=9)
-    ).decode("ascii")
+    packed = _encode(value)
+    if _chunking_enabled():
+        chunks = [packed[i : i + _CHUNK_SIZE] for i in range(0, len(packed), _CHUNK_SIZE)]
+    else:
+        chunks = [packed]
     generation = secrets.token_hex(8)
-    chunks = [packed[i:i + _CHUNK_SIZE] for i in range(0, len(packed), _CHUNK_SIZE)]
     try:
         previous = keyring.get_password(SERVICE, account)
         if len(chunks) == 1:

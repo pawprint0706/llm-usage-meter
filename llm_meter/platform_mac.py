@@ -5,6 +5,7 @@ Every function is a no-op on other platforms or when PyObjC is unavailable.
 
 import logging
 import sys
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,42 @@ def activate_app() -> None:
         app.activateIgnoringOtherApps_(True)
     except Exception:
         logger.debug("Could not activate the application", exc_info=True)
+
+
+def monitor_mouse_down(callback: Callable[[], None]) -> Optional[object]:
+    """Call ``callback`` for clicks delivered to another macOS application."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        from AppKit import (
+            NSEvent,
+            NSEventMaskLeftMouseDown,
+            NSEventMaskOtherMouseDown,
+            NSEventMaskRightMouseDown,
+        )
+
+        mask = (
+            NSEventMaskLeftMouseDown
+            | NSEventMaskRightMouseDown
+            | NSEventMaskOtherMouseDown
+        )
+        return NSEvent.addGlobalMonitorForEventsMatchingMask_handler_(
+            mask, lambda _event: callback()
+        )
+    except Exception:
+        logger.debug("Could not install the global mouse monitor", exc_info=True)
+        return None
+
+
+def stop_monitor(monitor: Optional[object]) -> None:
+    if monitor is None or sys.platform != "darwin":
+        return
+    try:
+        from AppKit import NSEvent
+
+        NSEvent.removeMonitor_(monitor)
+    except Exception:
+        logger.debug("Could not remove the global mouse monitor", exc_info=True)
 
 
 def notify(title: str, message: str) -> bool:

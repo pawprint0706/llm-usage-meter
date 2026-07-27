@@ -1,9 +1,11 @@
 """Widget-level tests. Qt runs on the offscreen platform, so no display is needed."""
 
 import os
+import sys
 import time
 import unittest
 from typing import Optional
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -229,18 +231,44 @@ class SizeTests(PopupTestCase):
 
         self.assertGreater(self.popup.height(), 300)
 
-    def test_show_near_remeasures_after_the_window_is_mapped(self):
-        """Regression: the first paint used an unmapped tab-bar height, so the
-        panel flashed with wrong margins until the next open."""
+    def test_show_near_finalises_the_size_before_the_window_is_mapped(self):
+        """The first painted frame must not be resized on the next event-loop tick."""
         self.make_ready()
+        resize = Mock(wraps=self.popup._resize_to_content)
+        self.popup._resize_to_content = resize
         self.popup.show_near(QRect(600, 0, 24, 24))
         self.addCleanup(self.popup.hide)
         first = self.popup.height()
 
         QApplication.processEvents()
 
+        self.assertEqual(resize.call_count, 1)
         self.assertEqual(self.popup.height(), first)
         self.assertGreater(self.popup.height(), 300)
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS-specific activation")
+    @patch("llm_meter.ui.popup.platform_mac.activate_app")
+    def test_show_near_activates_the_macos_accessory_app(self, activate):
+        self.make_ready()
+
+        self.popup.show_near(QRect(600, 0, 24, 24))
+        self.addCleanup(self.popup.hide)
+
+        activate.assert_called_once_with()
+
+    @unittest.skipUnless(sys.platform == "darwin", "macOS-specific mouse monitor")
+    def test_global_monitor_does_not_close_for_a_click_inside_the_panel(self):
+        self.make_ready()
+        self.popup.show_near(QRect(600, 0, 24, 24))
+        self.addCleanup(self.popup.hide)
+
+        with patch(
+            "llm_meter.ui.popup.QCursor.pos",
+            return_value=self.popup.frameGeometry().center(),
+        ):
+            self.popup._outside_clicked.emit()
+
+        self.assertTrue(self.popup.isVisible())
 
     def test_rebuilding_a_visible_popup_keeps_the_cards_and_the_height(self):
         """Regression: widgets added to a visible layout used to measure as hidden,

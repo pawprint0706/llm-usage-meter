@@ -1,11 +1,12 @@
 """The panel that opens next to the tray icon."""
 
 import logging
+import sys
 import time
 from contextlib import contextmanager
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QPoint, QRect, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QCursor,
@@ -33,7 +34,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import format as fmt
+from .. import format as fmt, platform_mac
 from ..i18n import tr
 from ..providers import State
 from . import glyphs, theme
@@ -59,8 +60,7 @@ TAB_BAR_MARGIN_RIGHT = 10
 HEADER_ACTION_SIZE = 16
 HEADER_ACTION_GAP = 12
 PANEL_MARGIN = 12
-# Swallow outside presses briefly after open so the tray click that spawned
-# this Qt.Popup cannot dismiss it on the same interaction.
+# Non-macOS Qt.Popup windows need to swallow the tray interaction briefly.
 OUTSIDE_CLICK_GUARD_MS = 300
 
 
@@ -151,12 +151,17 @@ def _action_icon(glyph: str, color: QColor, size: int) -> QIcon:
 
 
 class PopupWindow(QWidget):
-    """Frameless popup: closes as soon as the user clicks outside it."""
+    """Frameless panel that closes as soon as the user clicks outside it."""
+
+    _outside_clicked = Signal()
 
     def __init__(self, app):
+        window_type = (
+            Qt.WindowType.Tool if sys.platform == "darwin" else Qt.WindowType.Popup
+        )
         super().__init__(
             None,
-            Qt.WindowType.Popup
+            window_type
             | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.NoDropShadowWindowHint,
         )
@@ -167,7 +172,12 @@ class PopupWindow(QWidget):
         self._selected_provider_id: Optional[str] = None
         self._tab_ids: list[str] = []
         self._ignore_outside_until = 0.0
+        self._mouse_monitor = None
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        if sys.platform == "darwin":
+            self.setAttribute(Qt.WidgetAttribute.WA_MacAlwaysShowToolWindow)
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+            self._outside_clicked.connect(self._on_global_mouse_down)
         self.setFixedWidth(PANEL_WIDTH + 2 * SHADOW_MARGIN)
         self._hooks = CardHooks(
             run_entry=self._app.run_entry,
@@ -506,20 +516,24 @@ class PopupWindow(QWidget):
         self.rebuild()
         self._place()
         self._arm_outside_click_guard()
+        if sys.platform == "darwin":
+            # A menu-bar accessory can still be inactive on its first open.
+            # activateWindow() alone then lets the first content click get consumed
+            # as application activation instead of delivering it to the tab.
+            platform_mac.activate_app()
         self.show()
         self.raise_()
         self.activateWindow()
-        # Tab-bar geometry is unreliable until the window is mapped; remeasure next
-        # tick so the first paint does not flash with collapsed margins/height.
-        QTimer.singleShot(0, self._finish_show)
-
-    def _finish_show(self) -> None:
-        if not self.isVisible() or self._menu_depth:
-            return
-        self._resize_to_content()
-        self._place()
 
     def _arm_outside_click_guard(self) -> None:
+        if sys.platform == "darwin":
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self)
+            self._mouse_monitor = platform_mac.monitor_mouse_down(
+                self._outside_clicked.emit
+            )
+            return
         self._ignore_outside_until = time.monotonic() + OUTSIDE_CLICK_GUARD_MS / 1000.0
         app = QApplication.instance()
         if app is not None:
@@ -527,11 +541,32 @@ class PopupWindow(QWidget):
 
     def _disarm_outside_click_guard(self) -> None:
         self._ignore_outside_until = 0.0
+        platform_mac.stop_monitor(self._mouse_monitor)
+        self._mouse_monitor = None
         app = QApplication.instance()
         if app is not None:
             app.removeEventFilter(self)
 
+    def _on_global_mouse_down(self) -> None:
+        """Ignore native monitor callbacks for clicks that landed in the panel."""
+        if (
+            self.isVisible()
+            and not self._menu_depth
+            and not self.frameGeometry().contains(QCursor.pos())
+        ):
+            self.hide()
+
     def eventFilter(self, watched, event) -> bool:  # noqa: N802
+        if (
+            sys.platform == "darwin"
+            and self.isVisible()
+            and not self._menu_depth
+            and event.type() == QEvent.Type.MouseButtonPress
+            and isinstance(event, QMouseEvent)
+            and not self.frameGeometry().contains(event.globalPosition().toPoint())
+        ):
+            self.hide()
+            return False
         if (
             self.isVisible()
             and self._ignore_outside_until

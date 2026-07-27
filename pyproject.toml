@@ -30,4 +30,7 @@ include = ["llm_meter*"]
 "share/llm-usage-meter" = [
     "assets/codex-blossom.ico",
     "assets/cursor-cube.svg",
+    "assets/app-icon.png",
+    "assets/app-icon.ico",
+    "assets/app-icon.icns",
 ]

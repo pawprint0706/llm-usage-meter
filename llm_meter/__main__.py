@@ -89,14 +89,21 @@ def main() -> None:
         log.warning("LLM Usage Meter is already running; exiting.")
         return
 
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
+    from . import paths
     from .app import APP_TITLE, MeterApp
 
     qt_app = QApplication(sys.argv)
     qt_app.setApplicationName(APP_TITLE)
     qt_app.setApplicationDisplayName(APP_TITLE)
     qt_app.setQuitOnLastWindowClosed(False)
+    for name in ("app-icon.png", "app-icon.ico", "app-icon.icns"):
+        icon_path = paths.asset(name)
+        if icon_path:
+            qt_app.setWindowIcon(QIcon(icon_path))
+            break
     if not QSystemTrayIcon.isSystemTrayAvailable():
         log.error("No system tray is available on this desktop session")
         sys.exit(1)

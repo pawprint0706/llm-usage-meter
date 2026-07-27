@@ -26,6 +26,8 @@ ASSETS = ROOT / "assets"
 
 APP_NAME = "LLM Usage Meter"
 BIN_NAME = "llm-usage-meter"
+ICON_ICNS = ASSETS / "app-icon.icns"
+ICON_ICO = ASSETS / "app-icon.ico"
 
 datas = [(str(ASSETS), "assets")]
 binaries: list = []
@@ -109,7 +111,7 @@ if sys.platform == "darwin":
     app = BUNDLE(
         coll,
         name=f"{APP_NAME}.app",
-        icon=None,
+        icon=str(ICON_ICNS) if ICON_ICNS.is_file() else None,
         bundle_identifier="local.llm-usage-meter",
         info_plist={
             "CFBundleName": APP_NAME,
@@ -145,4 +147,5 @@ else:
         target_arch=None,
         codesign_identity=None,
         entitlements_file=None,
+        icon=str(ICON_ICO) if ICON_ICO.is_file() else None,
     )

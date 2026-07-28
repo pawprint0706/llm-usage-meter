@@ -195,11 +195,7 @@ class PopupWindow(QWidget):
 
         self._panel = QFrame(self)
         self._panel.setObjectName("panel")
-        shadow = QGraphicsDropShadowEffect(self._panel)
-        shadow.setBlurRadius(24)
-        shadow.setOffset(0, 4)
-        shadow.setColor(QColor(0, 0, 0, 90))
-        self._panel.setGraphicsEffect(shadow)
+        self._install_shadow()
         outer.addWidget(self._panel)
 
         panel_layout = QVBoxLayout(self._panel)
@@ -250,6 +246,25 @@ class PopupWindow(QWidget):
     def _tool_button(self, glyph: str, tip: str, palette: theme.Palette) -> QToolButton:
         return _ActionButton(glyph, tip, palette, self._panel)
 
+    def _install_shadow(self) -> None:
+        shadow = QGraphicsDropShadowEffect(self._panel)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 90))
+        self._panel.setGraphicsEffect(shadow)
+
+    def _flush_frame(self) -> None:
+        """Force a redraw after replacing children under the drop shadow.
+
+        ``QGraphicsDropShadowEffect`` keeps a cached source pixmap. Swapping the
+        header/tabs without a geometry change (typical for a same-size refresh)
+        leaves that cache on screen — especially on Windows translucent popups —
+        until something like a tab switch invalidates it.
+        """
+        self._install_shadow()
+        self._panel.update()
+        self.update()
+
     def rebuild(self) -> None:
         """Re-render everything from current provider state."""
         if self._menu_depth:
@@ -280,6 +295,7 @@ class PopupWindow(QWidget):
         self._resize_to_content()
         if self.isVisible():
             self._place()
+            self._flush_frame()
 
     def _build_header(self, palette: theme.Palette) -> None:
         self._clear(self._header)

@@ -211,8 +211,11 @@ class MeterApp(QObject):
 
     def _refresh_provider_by_id(self, provider_id: str) -> None:
         provider = self._providers_by_id.get(provider_id)
-        if provider:
-            self._run_background(provider.refresh)
+        if not provider:
+            return
+        if self._begin_loading(provider):
+            self._repaint_timer.start()
+        self._run_background(provider.refresh)
 
     def _on_color_scheme_changed(self, _scheme) -> None:
         self._update_tray_icon(force=True)
@@ -227,10 +230,23 @@ class MeterApp(QObject):
 
     # ------------------------------------------------------------------- refresh
 
+    @staticmethod
+    def _begin_loading(provider: Provider) -> bool:
+        """Flip to LOADING on the GUI thread so the open panel can paint immediately."""
+        if not provider.enabled or provider.state is State.SIGNED_OUT:
+            return False
+        provider.state = State.LOADING
+        return True
+
     def refresh_all(self) -> None:
+        loading = False
         for provider in self.providers:
-            if provider.enabled:
-                self._run_background(provider.refresh)
+            if not provider.enabled:
+                continue
+            loading = self._begin_loading(provider) or loading
+            self._run_background(provider.refresh)
+        if loading:
+            self._repaint_timer.start()
 
     # ---------------------------------------------------------------------- tray
 

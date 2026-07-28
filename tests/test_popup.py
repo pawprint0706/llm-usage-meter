@@ -211,6 +211,24 @@ class ContentTests(PopupTestCase):
         stamp = next(text for text in labels if "Updated" in text or "업데이트" in text)
         self.assertLess(labels.index(title), labels.index(stamp))
 
+    def test_rebuilding_a_visible_popup_swaps_the_updated_stamp(self):
+        """Regression: a same-size refresh must replace the header stamp in-place."""
+        self.make_ready()
+        self.popup.show_near(QRect(600, 0, 24, 24))
+        self.addCleanup(self.popup.hide)
+
+        for provider in self.providers:
+            if provider.enabled:
+                provider.state = State.LOADING
+        self.popup.rebuild()
+
+        labels = self.labels()
+        self.assertTrue(
+            any(text in ("Fetching...", "가져오는 중...") for text in labels),
+            labels,
+        )
+        self.assertIsNotNone(self.popup._panel.graphicsEffect())
+
     def test_the_active_tab_is_shorter_than_both_cards_stacked(self):
         self.make_ready()
         self.popup.rebuild()

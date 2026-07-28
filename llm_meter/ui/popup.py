@@ -171,6 +171,7 @@ class PopupWindow(QWidget):
         self._menu_depth = 0
         self._selected_provider_id: Optional[str] = None
         self._tab_ids: list[str] = []
+        self._stamp_label: Optional[QLabel] = None
         self._ignore_outside_until = 0.0
         self._mouse_monitor = None
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -247,30 +248,19 @@ class PopupWindow(QWidget):
         return _ActionButton(glyph, tip, palette, self._panel)
 
     def _install_shadow(self) -> None:
+        # Drop-shadow caches a source pixmap. On Windows translucent Qt.Popup
+        # windows that cache stays stale across same-size child updates, so the
+        # open panel only redraws after a tab switch. Skip the effect there.
+        if sys.platform == "win32":
+            self._panel.setGraphicsEffect(None)
+            return
         shadow = QGraphicsDropShadowEffect(self._panel)
         shadow.setBlurRadius(24)
         shadow.setOffset(0, 4)
         shadow.setColor(QColor(0, 0, 0, 90))
         self._panel.setGraphicsEffect(shadow)
 
-    def _flush_frame(self) -> None:
-        """Force a redraw after replacing children under the drop shadow.
-
-        ``QGraphicsDropShadowEffect`` keeps a cached source pixmap. Swapping the
-        header/tabs without a geometry change (typical for a same-size refresh)
-        leaves that cache on screen — especially on Windows translucent popups —
-        until something like a tab switch invalidates it.
-        """
-        self._install_shadow()
-        self._panel.update()
-        self.update()
-
-    def rebuild(self) -> None:
-        """Re-render everything from current provider state."""
-        if self._menu_depth:
-            self._dirty = True
-            return
-        palette = theme.current()
+    def _apply_panel_style(self, palette: theme.Palette) -> None:
         self._panel.setStyleSheet(
             f"#panel {{ background: {palette.window};"
             f" border: 1px solid {palette.border}; border-radius: 14px; }}"
@@ -290,22 +280,46 @@ class PopupWindow(QWidget):
         self._scroll.viewport().setStyleSheet("background: transparent;")
         self._content.setStyleSheet("background: transparent;")
 
-        self._build_header(palette)
-        self._build_tabs(palette)
+    def _visible_provider_ids(self) -> list[str]:
+        return [provider.id for provider in self._app.providers if provider.enabled]
+
+    def _tabs_match_structure(self) -> bool:
+        tabs = self._content.findChild(QTabWidget)
+        return tabs is not None and self._tab_ids == self._visible_provider_ids()
+
+    def rebuild(self) -> None:
+        """Re-render everything from current provider state."""
+        if self._menu_depth:
+            self._dirty = True
+            return
+        palette = theme.current()
+        self._apply_panel_style(palette)
+
+        # Prefer in-place updates while the panel is open: destroying the
+        # QTabWidget on Windows leaves the current page's pixels stuck until the
+        # user switches tabs.
+        if self._tabs_match_structure():
+            self._update_header_stamp(palette)
+            self._replace_cards(palette)
+        else:
+            self._build_header(palette)
+            self._build_tabs(palette)
         self._resize_to_content()
         if self.isVisible():
             self._place()
-            self._flush_frame()
+            self._reveal_current_page()
 
     def _build_header(self, palette: theme.Palette) -> None:
         self._clear(self._header)
+        self._stamp_label = None
         title = _label(
             self._panel, tr("LLM 사용량", "LLM usage"), palette.text, 0, QFont.Weight.DemiBold
         )
         self._add(self._header, title)
         updated = self._updated_text()
         if updated:
-            self._add(self._header, _label(self._panel, updated, palette.faint, -3))
+            self._stamp_label = _label(self._panel, updated, palette.faint, -3)
+            self._add(self._header, self._stamp_label)
         self._header.addStretch(1)
         refresh = self._tool_button("⟳", tr("모두 새로고침", "Refresh all"), palette)
         refresh.clicked.connect(self._app.refresh_all)
@@ -317,6 +331,108 @@ class PopupWindow(QWidget):
         self._add(actions, refresh)
         self._add(actions, settings)
         self._header.addLayout(actions)
+
+    def _update_header_stamp(self, palette: theme.Palette) -> None:
+        """Swap only the stamp text so a refresh does not rebuild the tool buttons."""
+        updated = self._updated_text()
+        if self._stamp_label is None:
+            if updated:
+                self._build_header(palette)
+            return
+        if not updated:
+            self._stamp_label.hide()
+            self._stamp_label.setText("")
+            return
+        self._stamp_label.setText(updated)
+        self._stamp_label.setStyleSheet(f"color: {palette.faint}; background: transparent;")
+        self._stamp_label.show()
+        self._stamp_label.repaint()
+
+    def show_fetching_stamp(self) -> None:
+        """Paint the loading stamp immediately, before the debounced card rebuild."""
+        if not self.isVisible() or self._menu_depth:
+            return
+        if self._stamp_label is None:
+            self._build_header(theme.current())
+            return
+        self._stamp_label.setText(tr("가져오는 중...", "Fetching..."))
+        self._stamp_label.setStyleSheet(
+            f"color: {theme.current().faint}; background: transparent;"
+        )
+        self._stamp_label.show()
+        self._stamp_label.repaint()
+        if sys.platform == "win32":
+            self._invalidate_win32_surface()
+
+    def _replace_cards(self, palette: theme.Palette) -> None:
+        """Replace each page's ProviderCard without tearing down the QTabWidget."""
+        tabs = self._content.findChild(QTabWidget)
+        if tabs is None:
+            self._build_tabs(palette)
+            return
+        by_id = {provider.id: provider for provider in self._app.providers}
+        for index, provider_id in enumerate(self._tab_ids):
+            provider = by_id.get(provider_id)
+            page = tabs.widget(index)
+            if provider is None or page is None:
+                continue
+            layout = page.layout()
+            if layout is None:
+                continue
+            old = page.findChild(ProviderCard)
+            if old is not None:
+                layout.removeWidget(old)
+                old.hide()
+                old.setParent(None)
+                old.deleteLater()
+            card = ProviderCard(provider, palette, self._hooks, page)
+            layout.addWidget(card)
+            card.show()
+        QApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+    def _reveal_current_page(self) -> None:
+        """Make the active stacked page paint after an in-place card swap.
+
+        QTabWidget on a translucent Windows popup often keeps the previous page
+        pixels until the current index changes — the same thing users trigger by
+        switching tabs once.
+        """
+        tabs = self._content.findChild(QTabWidget)
+        if tabs is not None and tabs.count() > 0:
+            current = tabs.currentIndex()
+            page = tabs.widget(current)
+            if tabs.count() > 1:
+                tabs.blockSignals(True)
+                tabs.setCurrentIndex((current + 1) % tabs.count())
+                tabs.setCurrentIndex(current)
+                tabs.blockSignals(False)
+            elif page is not None:
+                page.hide()
+                page.show()
+            if page is not None:
+                page.show()
+                card = page.findChild(ProviderCard)
+                if card is not None:
+                    card.show()
+                    card.repaint()
+                page.repaint()
+        if self._stamp_label is not None:
+            self._stamp_label.repaint()
+        self._panel.repaint()
+        self.repaint()
+        if sys.platform == "win32":
+            self._invalidate_win32_surface()
+
+    def _invalidate_win32_surface(self) -> None:
+        """Ask DWM to discard a stale layered-window buffer for this popup."""
+        try:
+            import ctypes
+
+            hwnd = int(self.winId())
+            # RDW_INVALIDATE | RDW_ERASE | RDW_ALLCHILDREN | RDW_UPDATENOW | RDW_FRAME
+            ctypes.windll.user32.RedrawWindow(hwnd, None, None, 0x0001 | 0x0004 | 0x0080 | 0x0100 | 0x0400)
+        except Exception:
+            logger.debug("Could not invalidate the Win32 popup surface", exc_info=True)
 
     def _build_tabs(self, palette: theme.Palette) -> None:
         self._clear(self._content_layout)

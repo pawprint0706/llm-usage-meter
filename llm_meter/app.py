@@ -214,7 +214,8 @@ class MeterApp(QObject):
         if not provider:
             return
         if self._begin_loading(provider):
-            self._repaint_timer.start()
+            self.popup.show_fetching_stamp()
+            QTimer.singleShot(0, self._repaint)
         self._run_background(provider.refresh)
 
     def _on_color_scheme_changed(self, _scheme) -> None:
@@ -246,7 +247,8 @@ class MeterApp(QObject):
             loading = self._begin_loading(provider) or loading
             self._run_background(provider.refresh)
         if loading:
-            self._repaint_timer.start()
+            self.popup.show_fetching_stamp()
+            QTimer.singleShot(0, self._repaint)
 
     # ---------------------------------------------------------------------- tray
 

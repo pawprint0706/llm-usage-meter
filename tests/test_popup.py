@@ -216,6 +216,7 @@ class ContentTests(PopupTestCase):
         self.make_ready()
         self.popup.show_near(QRect(600, 0, 24, 24))
         self.addCleanup(self.popup.hide)
+        tabs_before = self.tabs()
 
         for provider in self.providers:
             if provider.enabled:
@@ -227,7 +228,31 @@ class ContentTests(PopupTestCase):
             any(text in ("Fetching...", "가져오는 중...") for text in labels),
             labels,
         )
-        self.assertIsNotNone(self.popup._panel.graphicsEffect())
+        self.assertIs(self.tabs(), tabs_before)
+        if sys.platform == "win32":
+            self.assertIsNone(self.popup._panel.graphicsEffect())
+        else:
+            self.assertIsNotNone(self.popup._panel.graphicsEffect())
+
+    def test_in_place_rebuild_replaces_card_values_without_changing_tabs(self):
+        """Windows used to keep the previous card pixels until the user switched tabs."""
+        self.make_ready()
+        self.popup.show_near(QRect(600, 0, 24, 24))
+        self.addCleanup(self.popup.hide)
+        tabs_before = self.tabs()
+        card_before = self.cards()[tabs_before.currentIndex()]
+
+        usage = codex_usage()
+        usage.windows[0].used_percent = 91.0
+        self.providers[0].data = usage
+        self.providers[0].snapshot = self.providers[0].render(usage)
+        self.providers[0].fetched_at = time.time()
+        self.popup.rebuild()
+
+        self.assertIs(self.tabs(), tabs_before)
+        card_after = self.cards()[tabs_before.currentIndex()]
+        self.assertIsNot(card_after, card_before)
+        self.assertIn("91%", self.labels())
 
     def test_the_active_tab_is_shorter_than_both_cards_stacked(self):
         self.make_ready()

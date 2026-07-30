@@ -150,10 +150,20 @@ class OpenCodeProvider(Provider):
 
     def _go_section(self, data: Loaded) -> Section:
         go = data.console.go
+        url = api.go_page(self.workspace_id) if self.workspace_id else api.CONSOLE_BASE
+        if go is None:
+            return Section(
+                title=tr("Go 플랜 사용량", "Go plan usage"),
+                url=url,
+                note=tr(
+                    "Go 플랜 사용량 가져오기 실패. 구독 상태를 확인하세요",
+                    "Could not fetch the Go plan usage. Check your subscription",
+                ),
+            )
         limits = self.limits
         metrics: list[Metric] = []
         for korean, english, key in PERIODS:
-            window = getattr(go, key, None) if go else None
+            window = getattr(go, key, None)
             label = tr(korean, english)
             percent = api.usage_percent(window)
             if percent is None:
@@ -181,7 +191,7 @@ class OpenCodeProvider(Provider):
                 )
             )
         note = None
-        if go and go.use_balance:
+        if go.use_balance:
             note = tr(
                 "이 워크스페이스는 Zen 크레딧으로 결제합니다",
                 "This workspace bills against Zen credits",
@@ -189,7 +199,7 @@ class OpenCodeProvider(Provider):
         return Section(
             title=tr("Go 플랜 사용량", "Go plan usage"),
             metrics=metrics,
-            url=api.go_page(self.workspace_id) if self.workspace_id else api.CONSOLE_BASE,
+            url=url,
             note=note,
         )
 
@@ -200,7 +210,7 @@ class OpenCodeProvider(Provider):
             return Section(
                 title=title,
                 url=url,
-                note=tr("잔액을 조회하지 못했습니다", "Could not read the balance"),
+                note=tr("크레딧 정보 가져오기 실패", "Could not fetch the credit info"),
             )
         metrics = [
             Metric(

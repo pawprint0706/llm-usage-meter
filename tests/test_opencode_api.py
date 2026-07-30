@@ -212,11 +212,34 @@ class FetchConsoleTests(unittest.TestCase):
 
         self.assertIn("404", str(caught.exception))
 
-    def test_unparseable_html_is_dumped_for_diagnosis(self):
-        with self.assertRaises(api.ParseError) as caught:
-            self.fetch(self.page(text="<html>nothing useful</html>"))
+    def test_unparseable_go_html_is_a_section_failure_and_is_dumped(self):
+        data, _ = self.fetch(self.page(text="<html>nothing useful</html>"), self.page())
 
-        self.assertIn("opencode-last-fetch.html", str(caught.exception))
+        self.assertIsNone(data.go)
+        self.assertIn("opencode-last-fetch.html", data.go_error)
+
+    def test_a_cancelled_go_plan_still_shows_the_zen_balance(self):
+        data, session = self.fetch(self.page(text=BILLING_HTML))
+
+        self.assertIsNone(data.go)
+        self.assertIsNotNone(data.go_error)
+        self.assertAlmostEqual(data.zen.balance, 16.1308929)
+        self.assertEqual(session.get.call_count, 1)
+
+    def test_a_go_page_failure_still_fetches_zen_from_the_home_page(self):
+        data, session = self.fetch(self.page(500), self.page(text=BILLING_HTML))
+
+        self.assertIsNone(data.go)
+        self.assertIn("500", data.go_error)
+        self.assertAlmostEqual(data.zen.balance, 16.1308929)
+        self.assertEqual(session.get.call_count, 2)
+
+    def test_a_total_billing_failure_is_recorded(self):
+        data, _ = self.fetch(self.page(text=GO_HTML), self.page(text="<html>nothing</html>"))
+
+        self.assertIsNotNone(data.go)
+        self.assertIsNone(data.zen)
+        self.assertEqual(data.zen_error, "no billing data found")
 
     def test_a_missing_key_is_refused_before_any_request(self):
         with self.assertRaises(api.AuthExpiredError):

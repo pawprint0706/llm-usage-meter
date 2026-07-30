@@ -288,7 +288,19 @@ class OpenCodeRenderTests(unittest.TestCase):
         section = self.render(console(zen=None)).sections[1]
 
         self.assertEqual(section.metrics, [])
-        self.assertEqual(section.note, "Could not read the balance")
+        self.assertEqual(section.note, "Could not fetch the credit info")
+
+    def test_a_missing_go_plan_is_explained_without_hiding_zen(self):
+        snapshot = self.render(console(go=None))
+
+        section = snapshot.sections[0]
+        self.assertEqual(section.metrics, [])
+        self.assertEqual(
+            section.note, "Could not fetch the Go plan usage. Check your subscription"
+        )
+        self.assertEqual(section.url, opencode_api.go_page("wrk_1"))
+        self.assertIsNone(snapshot.gauge_percent)
+        self.assertEqual(snapshot.sections[1].metrics[0].value, "$16.13")
 
     def test_the_gauge_follows_the_busiest_period(self):
         snapshot = self.render()

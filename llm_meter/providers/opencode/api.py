@@ -88,6 +88,7 @@ class ZenBilling:
 class ConsoleData:
     go: Optional[GoUsage] = None
     zen: Optional[ZenBilling] = None
+    go_error: Optional[str] = None
     zen_error: Optional[str] = None
 
 
@@ -444,10 +445,13 @@ def find_workspace_id(session_key: str) -> Optional[str]:
 def fetch_console(session_key: str, workspace_id: Optional[str] = None) -> ConsoleData:
     """Fetch Go usage and Zen billing by parsing the console SSR HTML.
 
+    Go and Zen are collected independently: a cancelled Go subscription must
+    not hide the remaining Zen credit balance, and vice versa. Each side
+    records its failure in ``ConsoleData.go_error`` / ``zen_error`` instead of
+    raising, so the UI can show numbers for whichever side succeeded.
+
     :raises AuthExpiredError: when the session key is missing/expired.
-    :raises FetchError: on unexpected HTTP status or a missing workspace.
-    :raises ParseError: when the Go usage data cannot be located in the HTML
-        (the page is dumped to the config dir for diagnosis).
+    :raises FetchError: when the workspace is gone (HTTP 404) or undiscoverable.
     :raises requests.RequestException: on network failure.
     """
     if not session_key:
@@ -459,6 +463,7 @@ def fetch_console(session_key: str, workspace_id: Optional[str] = None) -> Conso
             raise FetchError("could not discover the workspace ID")
 
     session = _session(session_key)
+    data = ConsoleData()
     response = session.get(go_page(workspace_id), timeout=15, allow_redirects=False)
 
     if response.status_code in _REDIRECT_CODES:
@@ -466,15 +471,20 @@ def fetch_console(session_key: str, workspace_id: Optional[str] = None) -> Conso
         raise AuthExpiredError(f"session expired (redirected to {location})")
     if response.status_code in (401, 403):
         raise AuthExpiredError(f"HTTP {response.status_code}")
-    if response.status_code != 200:
+    if response.status_code == 404:
+        # The workspace was removed or renamed: the provider rediscovers it.
         raise FetchError(f"the Go page returned HTTP {response.status_code}")
+    if response.status_code != 200:
+        data.go_error = f"the Go page returned HTTP {response.status_code}"
+        logger.warning("Could not fetch the Go usage: %s", data.go_error)
+    else:
+        data.go = parse_go_usage(response.text)
+        if data.go is None:
+            dump = _dump_html(response.text)
+            data.go_error = f"no usage data found in the HTML (page saved to {dump})"
+            logger.warning("Could not read the Go usage: %s", data.go_error)
+        data.zen = parse_zen_billing(response.text)
 
-    go = parse_go_usage(response.text)
-    if go is None:
-        dump = _dump_html(response.text)
-        raise ParseError(f"no usage data found in the HTML (page saved to {dump})")
-
-    data = ConsoleData(go=go, zen=parse_zen_billing(response.text))
     if data.zen is None:
         # Older console builds only embed billing on the workspace home page.
         try:
@@ -484,6 +494,10 @@ def fetch_console(session_key: str, workspace_id: Optional[str] = None) -> Conso
         except requests.RequestException as exc:
             logger.warning("Could not fetch the Zen balance: %s", exc)
             data.zen_error = str(exc)
+    if data.zen is None and data.zen_error is None:
+        # The Zen balance always exists (0 at worst), so this is a server issue.
+        data.zen_error = "no billing data found"
+        logger.warning("Could not read the Zen balance: %s", data.zen_error)
     return data
 
 

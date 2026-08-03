@@ -284,6 +284,42 @@ class OpenCodeRenderTests(unittest.TestCase):
         self.assertEqual(metric.value, "$20")
         self.assertEqual(metric.detail, "when below $5")
 
+    def test_a_previous_month_figure_counts_as_zero_usage(self):
+        stale = (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)).date()
+        data = console(
+            zen=opencode_api.ZenBilling(
+                balance=16.1308929,
+                monthly_limit=20,
+                monthly_usage=3.87,
+                time_monthly_usage_updated=f"{stale.isoformat()}T05:29:20.000Z",
+            )
+        )
+
+        metric = self.render(data).sections[1].metrics[1]
+
+        self.assertEqual(metric.label, "This month")
+        self.assertEqual(metric.value, "$0.00 / $20")
+        self.assertEqual(metric.percent, 0)
+        self.assertEqual(metric.detail, f"as of {stale.month}/{stale.day} — not refreshed")
+
+    def test_a_current_month_figure_is_shown_as_is(self):
+        now = datetime.now(timezone.utc)
+        fresh = f"{now.year:04d}-{now.month:02d}-{now.day:02d}T00:00:00.000Z"
+        data = console(
+            zen=opencode_api.ZenBilling(
+                balance=16.1308929,
+                monthly_limit=20,
+                monthly_usage=3.87,
+                time_monthly_usage_updated=fresh,
+            )
+        )
+
+        metric = self.render(data).sections[1].metrics[1]
+
+        self.assertEqual(metric.value, "$3.87 / $20")
+        self.assertAlmostEqual(metric.percent, 19.35)
+        self.assertIsNone(metric.detail)
+
     def test_a_missing_billing_record_is_explained(self):
         section = self.render(console(zen=None)).sections[1]
 

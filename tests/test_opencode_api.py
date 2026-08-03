@@ -16,7 +16,9 @@ GO_HTML = (
 
 BILLING_HTML = (
     '$R[36]($R[16],$R[274]={customerID:"cus_x",balance:1613089290,'
-    'monthlyLimit:20,monthlyUsage:387000000,reload:!1,reloadAmount:20,'
+    'monthlyLimit:20,monthlyUsage:387000000,'
+    'timeMonthlyUsageUpdated:new Date("2026-07-31T05:29:20.000Z"),'
+    'reload:!1,reloadAmount:20,'
     'reloadTrigger:5,paymentMethodType:"card",'
     'timeCreated:new Date("2026-07-20T11:25:36.000Z")});'
 )
@@ -113,6 +115,7 @@ class ZenBillingTests(unittest.TestCase):
         self.assertAlmostEqual(zen.balance, 16.1308929)
         self.assertEqual(zen.monthly_limit, 20)
         self.assertAlmostEqual(zen.monthly_usage, 3.87)
+        self.assertEqual(zen.time_monthly_usage_updated, "2026-07-31T05:29:20.000Z")
         self.assertFalse(zen.reload_enabled)
         self.assertEqual(zen.reload_amount, 20)
         self.assertEqual(zen.reload_trigger, 5)
@@ -129,6 +132,19 @@ class ZenBillingTests(unittest.TestCase):
 
     def test_a_non_numeric_balance_is_ignored(self):
         self.assertIsNone(api.parse_zen_billing('balance:"nope",cost:1'))
+
+
+class UsageUpdatedAtTests(unittest.TestCase):
+    def test_the_iso_string_is_parsed_as_utc(self):
+        updated = api.usage_updated_at("2026-07-31T05:29:20.000Z")
+
+        self.assertIsNotNone(updated)
+        self.assertEqual((updated.year, updated.month, updated.day), (2026, 7, 31))
+        self.assertEqual(updated.utcoffset().total_seconds(), 0)
+
+    def test_missing_or_garbage_values_are_none(self):
+        self.assertIsNone(api.usage_updated_at(None))
+        self.assertIsNone(api.usage_updated_at("not a date"))
 
 
 class WorkspaceDiscoveryTests(unittest.TestCase):

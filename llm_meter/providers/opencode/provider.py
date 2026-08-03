@@ -3,6 +3,7 @@
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -219,15 +220,34 @@ class OpenCodeProvider(Provider):
                 muted=zen.balance is None,
             )
         ]
-        if zen.monthly_usage is not None:
+        usage = zen.monthly_usage
+        usage_detail = None
+        if usage is not None:
+            # The console only re-settles monthlyUsage when a Zen-billed charge
+            # lands, so after a month boundary it can still serve the previous
+            # month's total. A figure last settled before this month is not
+            # "this month" — show 0 and say when the console last refreshed.
+            updated = api.usage_updated_at(zen.time_monthly_usage_updated)
+            now = datetime.now(timezone.utc)
+            if updated is not None and (updated.year, updated.month) != (now.year, now.month):
+                usage = 0.0
+                usage_detail = tr(
+                    f"{updated.month}/{updated.day} 기준 · 미갱신",
+                    f"as of {updated.month}/{updated.day} — not refreshed",
+                )
             limit = zen.monthly_limit
             percent = None
-            value = fmt.money(zen.monthly_usage)
+            value = fmt.money(usage)
             if limit:
-                percent = min(100.0, zen.monthly_usage / limit * 100.0)
+                percent = min(100.0, usage / limit * 100.0)
                 value = f"{value} / {fmt.money_compact(limit)}"
             metrics.append(
-                Metric(label=tr("이번 달 사용", "This month"), value=value, percent=percent)
+                Metric(
+                    label=tr("이번 달 사용", "This month"),
+                    value=value,
+                    percent=percent,
+                    detail=usage_detail,
+                )
             )
         if zen.reload_enabled and zen.reload_amount and zen.reload_trigger is not None:
             metrics.append(

@@ -15,6 +15,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Optional, Type, Union
 
 import requests
@@ -78,6 +79,7 @@ class ZenBilling:
     balance: Optional[float] = None
     monthly_limit: Optional[float] = None
     monthly_usage: Optional[float] = None
+    time_monthly_usage_updated: Optional[str] = None
     reload_enabled: bool = False
     reload_amount: Optional[float] = None
     reload_trigger: Optional[float] = None
@@ -354,6 +356,11 @@ def parse_zen_billing(html: str) -> Optional[ZenBilling]:
             balance=_scaled(billing.get("balance")),
             monthly_limit=_plain(billing.get("monthlyLimit")),
             monthly_usage=_scaled(billing.get("monthlyUsage")),
+            time_monthly_usage_updated=(
+                billing.get("timeMonthlyUsageUpdated")
+                if isinstance(billing.get("timeMonthlyUsageUpdated"), str)
+                else None
+            ),
             reload_enabled=bool(billing.get("reload")),
             reload_amount=_plain(billing.get("reloadAmount")),
             reload_trigger=_plain(billing.get("reloadTrigger")),
@@ -373,6 +380,20 @@ def parse_zen_billing(html: str) -> Optional[ZenBilling]:
         if balance is not None:
             return ZenBilling(balance=balance)
     return None
+
+
+def usage_updated_at(value: Optional[str]) -> Optional[datetime]:
+    """The UTC instant a Zen usage figure was last settled, or None when unknown.
+
+    The console embeds ``timeMonthlyUsageUpdated`` as a seroval ``new Date(...)``
+    call whose ISO string the parser keeps verbatim (``...Z`` suffix included).
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def find_nested_key(data: Any, key: str) -> Any:

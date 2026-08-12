@@ -1,6 +1,6 @@
 [project]
 name = "llm-usage-meter"
-version = "1.0.9"
+version = "1.0.10"
 description = "Tray meter for Codex and OpenCode usage, credits and limits"
 readme = "README.md"
 requires-python = ">=3.10"

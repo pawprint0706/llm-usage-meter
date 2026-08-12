@@ -131,7 +131,11 @@ class OllamaProvider(Provider):
                     detail=detail,
                 )
             )
-        models = windows[0].models
+        # The webpage lists "Models used this week" — the weekly meter's
+        # per-model request counts, which can differ from the session's.
+        models = data.data.weekly.models if data.data.weekly else []
+        if not models and data.data.session:
+            models = data.data.session.models
         if models:
             for model in models:
                 metrics.append(

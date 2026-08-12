@@ -120,21 +120,33 @@ def parse_settings(html: str) -> SettingsData:
     meters = list(_METER_RE.finditer(html))
     resets = list(_RESET_RE.finditer(html))
     segments = list(_SEGMENT_RE.finditer(html))
-    # Both meters repeat the same model segments; keep each model once.
-    models: list[ModelUsage] = []
-    seen: set[str] = set()
-    for match in segments:
-        name = match.group(1)
-        if name in seen:
+
+    # Each meter carries its own model segments, and the session and weekly
+    # totals can differ, so assign every segment to the meter it appears in.
+    by_meter: dict[int, list[ModelUsage]] = {}
+    for segment in segments:
+        meter_index = None
+        for index, match in enumerate(meters):
+            if match.start() < segment.start():
+                meter_index = index
+            else:
+                break
+        if meter_index is None:
             continue
-        seen.add(name)
-        models.append(ModelUsage(name=name, requests=int(match.group(2))))
+        by_meter.setdefault(meter_index, []).append(
+            ModelUsage(name=segment.group(1), requests=int(segment.group(2)))
+        )
 
     for index, match in enumerate(meters):
         label = match.group(1)
         percent = float(match.group(2))
         reset = _parse_reset(resets[index].group(1)) if index < len(resets) else None
-        window = UsageWindow(label=label, percent=percent, reset_at=reset, models=models)
+        window = UsageWindow(
+            label=label,
+            percent=percent,
+            reset_at=reset,
+            models=by_meter.get(index, []),
+        )
         if label == "Session usage":
             data.session = window
         elif label == "Weekly usage":

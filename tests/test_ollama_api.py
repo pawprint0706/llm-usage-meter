@@ -17,7 +17,7 @@ SETTINGS_HTML = """
 <div class="relative group" data-usage-meter="">
   <div class="relative h-3 overflow-hidden rounded-full bg-neutral-200" data-usage-track="" aria-label="Session usage 2.6% used">
     <div class="flex h-full overflow-hidden bg-neutral-950" style="width: 2.6%; ">
-      <button type="button" class="relative h-full min-w-[2px] flex-none overflow-hidden border-r border-white p-0 last:border-r-0 focus-visible:outline-none" style="width: 100%; background: #4f46e5" data-usage-segment="" data-model="deepseek-v4-flash:0731" data-requests="131" aria-label="deepseek-v4-flash:0731: 131 requests"></button>
+      <button type="button" class="relative h-full min-w-[2px] flex-none overflow-hidden border-r border-white p-0 last:border-r-0 focus-visible:outline-none" style="width: 100%; background: #4f46e5" data-usage-segment="" data-model="deepseek-v4-flash:0731" data-requests="36" aria-label="deepseek-v4-flash:0731: 36 requests"></button>
     </div>
   </div>
 </div>
@@ -32,7 +32,7 @@ SETTINGS_HTML = """
 <div class="relative group" data-usage-meter="">
   <div class="relative h-3 overflow-hidden rounded-full bg-neutral-200" data-usage-track="" aria-label="Weekly usage 0.5% used">
     <div class="flex h-full overflow-hidden bg-neutral-950" style="width: 0.5%">
-      <button type="button" class="relative h-full min-w-[2px] flex-none overflow-hidden border-r border-white p-0 last:border-r-0 focus-visible:outline-none" style="width: 100%; background: #4f46e5" data-usage-segment="" data-model="deepseek-v4-flash:0731" data-requests="131" aria-label="deepseek-v4-flash:0731: 131 requests"></button>
+      <button type="button" class="relative h-full min-w-[2px] flex-none overflow-hidden border-r border-white p-0 last:border-r-0 focus-visible:outline-none" style="width: 100%; background: #4f46e5" data-usage-segment="" data-model="deepseek-v4-flash:0731" data-requests="375" aria-label="deepseek-v4-flash:0731: 375 requests"></button>
     </div>
   </div>
 </div>
@@ -77,7 +77,11 @@ class ParseSettingsTests(unittest.TestCase):
         self.assertEqual(data.weekly.reset_at.isoformat(), "2026-08-17T00:00:00+00:00")
         self.assertEqual(
             [(model.name, model.requests) for model in data.session.models],
-            [("deepseek-v4-flash:0731", 131)],
+            [("deepseek-v4-flash:0731", 36)],
+        )
+        self.assertEqual(
+            [(model.name, model.requests) for model in data.weekly.models],
+            [("deepseek-v4-flash:0731", 375)],
         )
         self.assertEqual(data.balance, 0.0)
         self.assertEqual(data.balance_text, "$0")

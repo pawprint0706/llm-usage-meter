@@ -480,13 +480,13 @@ def ollama_settings(**overrides) -> ollama_api.SettingsData:
             label="Session usage",
             percent=2.6,
             reset_at=datetime.now(timezone.utc) + timedelta(hours=1),
-            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 131)],
+            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 36)],
         ),
         weekly=ollama_api.UsageWindow(
             label="Weekly usage",
             percent=0.5,
             reset_at=datetime.now(timezone.utc) + timedelta(days=4),
-            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 131)],
+            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 375)],
         ),
         balance=0.0,
         balance_text="$0",
@@ -531,8 +531,23 @@ class OllamaRenderTests(unittest.TestCase):
         metrics = self.render().sections[0].metrics
 
         self.assertEqual(metrics[2].label, "deepseek-v4-flash:0731")
-        self.assertEqual(metrics[2].value, "131 req")
+        self.assertEqual(metrics[2].value, "375 req")
         self.assertTrue(metrics[2].muted)
+
+    def test_models_fall_back_to_the_session_meter_without_weekly(self):
+        data = ollama_settings(
+            session=ollama_api.UsageWindow(
+                label="Session usage",
+                percent=2.6,
+                reset_at=datetime.now(timezone.utc) + timedelta(hours=1),
+                models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 36)],
+            ),
+            weekly=None,
+        )
+
+        metrics = self.render(data).sections[0].metrics
+
+        self.assertEqual(metrics[1].value, "36 req")
 
     def test_a_zero_balance_is_muted(self):
         metric = self.render().sections[1].metrics[0]

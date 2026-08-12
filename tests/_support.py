@@ -56,6 +56,7 @@ class FakeUi:
     def __init__(self, clipboard: Optional[str] = None, answer: Optional[str] = None):
         self.clipboard = clipboard
         self.answer = answer
+        self.answers: list[Optional[str]] = []
         self.changed_count = 0
         self.copied: list[str] = []
         self.opened: list[str] = []
@@ -83,4 +84,6 @@ class FakeUi:
 
     def ask_text(self, title: str, prompt: str, secret: bool = False) -> Optional[str]:
         self.prompts.append((title, prompt, secret))
+        if self.answers:
+            return self.answers.pop(0)
         return self.answer

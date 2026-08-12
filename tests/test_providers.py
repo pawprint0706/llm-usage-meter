@@ -14,6 +14,8 @@ from llm_meter.providers.codex import api as codex_api
 from llm_meter.providers.codex.provider import CodexProvider
 from llm_meter.providers.cursor import api as cursor_api
 from llm_meter.providers.cursor.provider import CursorProvider, Loaded as CursorLoaded
+from llm_meter.providers.ollama import api as ollama_api
+from llm_meter.providers.ollama.provider import OllamaProvider, Loaded as OllamaLoaded
 from llm_meter.providers.opencode import api as opencode_api
 from llm_meter.providers.opencode.provider import OpenCodeProvider, Loaded
 
@@ -58,7 +60,8 @@ class RegistryTests(unittest.TestCase):
         providers = build_providers(Config(), FakeUi())
 
         self.assertEqual(
-            [provider.id for provider in providers], ["codex", "opencode", "cursor"]
+            [provider.id for provider in providers],
+            ["codex", "opencode", "cursor", "ollama"],
         )
         self.assertTrue(all(provider.enabled for provider in providers))
 
@@ -68,7 +71,8 @@ class RegistryTests(unittest.TestCase):
         providers = build_providers(cfg, FakeUi())
 
         self.assertEqual(
-            [provider.id for provider in providers], ["opencode", "codex", "cursor"]
+            [provider.id for provider in providers],
+            ["opencode", "codex", "cursor", "ollama"],
         )
 
     def test_a_disabled_service_reports_itself_as_such(self):
@@ -467,6 +471,268 @@ class OpenCodeSessionTests(unittest.TestCase):
                 opencode_api.stats_page("wrk_1"),
             ],
         )
+
+
+def ollama_settings(**overrides) -> ollama_api.SettingsData:
+    data = ollama_api.SettingsData(
+        plan="pro",
+        session=ollama_api.UsageWindow(
+            label="Session usage",
+            percent=2.6,
+            reset_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 131)],
+        ),
+        weekly=ollama_api.UsageWindow(
+            label="Weekly usage",
+            percent=0.5,
+            reset_at=datetime.now(timezone.utc) + timedelta(days=4),
+            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 131)],
+        ),
+        balance=0.0,
+        balance_text="$0",
+    )
+    for key, value in overrides.items():
+        setattr(data, key, value)
+    return data
+
+
+class OllamaRenderTests(unittest.TestCase):
+    def setUp(self):
+        self.ui = FakeUi()
+        self.provider = OllamaProvider(Config(), self.ui)
+
+    def render(self, data=None):
+        return self.provider.render(
+            OllamaLoaded(data=data or ollama_settings(), monotonic=time.monotonic())
+        )
+
+    def test_usage_and_balance_are_separate_sections(self):
+        snapshot = self.render()
+
+        self.assertEqual(
+            [section.title for section in snapshot.sections],
+            ["Cloud usage", "Extra usage"],
+        )
+        self.assertEqual(snapshot.sections[0].url, ollama_api.SETTINGS_PAGE)
+        self.assertEqual(snapshot.badge, "pro")
+
+    def test_each_window_shows_its_percentage_and_countdown(self):
+        metrics = self.render().sections[0].metrics
+
+        self.assertEqual(metrics[0].label, "Session usage")
+        self.assertEqual(metrics[0].value, "2.6%")
+        self.assertAlmostEqual(metrics[0].percent, 2.6)
+        self.assertIn("resets in", metrics[0].detail)
+        self.assertEqual(metrics[1].label, "Weekly usage")
+        self.assertEqual(metrics[1].value, "0.5%")
+        self.assertIn("resets in", metrics[1].detail)
+
+    def test_models_are_listed_after_the_windows(self):
+        metrics = self.render().sections[0].metrics
+
+        self.assertEqual(metrics[2].label, "deepseek-v4-flash:0731")
+        self.assertEqual(metrics[2].value, "131 req")
+        self.assertTrue(metrics[2].muted)
+
+    def test_a_zero_balance_is_muted(self):
+        metric = self.render().sections[1].metrics[0]
+
+        self.assertEqual(metric.label, "Balance")
+        self.assertEqual(metric.value, "$0")
+        self.assertTrue(metric.muted)
+
+    def test_a_positive_balance_is_not_muted(self):
+        metric = self.render(ollama_settings(balance=12.5, balance_text="$12.50")).sections[1].metrics[0]
+
+        self.assertEqual(metric.value, "$12.50")
+        self.assertFalse(metric.muted)
+
+    def test_a_missing_balance_is_explained(self):
+        section = self.render(ollama_settings(balance=None, balance_text=None)).sections[1]
+
+        self.assertEqual(section.metrics, [])
+        self.assertEqual(section.note, "Could not fetch the balance")
+
+    def test_a_missing_usage_is_explained(self):
+        snapshot = self.render(ollama_settings(session=None, weekly=None))
+
+        section = snapshot.sections[0]
+        self.assertEqual(section.metrics, [])
+        self.assertEqual(
+            section.note, "Could not fetch the usage. Check your subscription"
+        )
+        self.assertIsNone(snapshot.gauge_percent)
+
+    def test_the_gauge_follows_the_busiest_window(self):
+        snapshot = self.render()
+
+        self.assertAlmostEqual(snapshot.gauge_percent, 2.6)
+
+    def test_countdowns_shrink_as_time_passes(self):
+        loaded = OllamaLoaded(
+            data=ollama_settings(
+                session=ollama_api.UsageWindow(
+                    label="Session usage",
+                    percent=2.6,
+                    reset_at=datetime.now(timezone.utc) + timedelta(minutes=31),
+                    models=[],
+                )
+            ),
+            monotonic=time.monotonic(),
+        )
+
+        metrics = self.provider.render(loaded).sections[0].metrics
+
+        self.assertEqual(metrics[0].detail, "resets in 30m")
+
+
+class OllamaSessionTests(unittest.TestCase):
+    def setUp(self):
+        self.ui = FakeUi()
+        self.provider = OllamaProvider(Config(), self.ui)
+        self.saved_aid: list[str] = []
+        self.saved_session: list[str] = []
+        for patcher in (
+            patch(
+                "llm_meter.providers.ollama.provider.auth.load_aid",
+                return_value=None,
+            ),
+            patch(
+                "llm_meter.providers.ollama.provider.auth.load_session",
+                return_value=None,
+            ),
+            patch(
+                "llm_meter.providers.ollama.provider.auth.save_aid",
+                side_effect=self.saved_aid.append,
+            ),
+            patch(
+                "llm_meter.providers.ollama.provider.auth.save_session",
+                side_effect=self.saved_session.append,
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def entry(self, label: str):
+        return next(item for item in self.provider.menu() if item.label == label)
+
+    def test_a_signed_out_card_offers_both_ways_to_add_cookies(self):
+        labels = [entry.label for entry in self.provider.menu()]
+
+        self.assertIn("Paste aid from clipboard", labels)
+        self.assertIn("Paste __Secure-session from clipboard", labels)
+        self.assertIn("Enter session cookies...", labels)
+        self.assertNotIn("Sign out", labels)
+
+    def test_a_signed_in_card_hides_the_cookie_entries(self):
+        self.ui.answers = ["a" * 20, "s" * 40]
+        self.provider.primary_action().run()
+
+        labels = [entry.label for entry in self.provider.menu()]
+
+        self.assertNotIn("Paste aid from clipboard", labels)
+        self.assertNotIn("Paste __Secure-session from clipboard", labels)
+        self.assertNotIn("Enter session cookies...", labels)
+        self.assertIn("Sign out", labels)
+
+    def test_pasting_an_aid_stores_it_and_refreshes(self):
+        self.ui.clipboard = "aid=abc12345;"
+
+        self.entry("Paste aid from clipboard").run()
+
+        self.assertEqual(self.saved_aid, ["abc12345"])
+        self.assertEqual(self.ui.refresh_requests, ["ollama"])
+        self.assertFalse(self.provider.is_authenticated())
+
+    def test_pasting_a_session_stores_it_and_refreshes(self):
+        self.ui.clipboard = "__Secure-session=" + "k" * 40 + ";"
+
+        self.entry("Paste __Secure-session from clipboard").run()
+
+        self.assertEqual(self.saved_session, ["k" * 40])
+        self.assertEqual(self.ui.refresh_requests, ["ollama"])
+        self.assertFalse(self.provider.is_authenticated())
+
+    def test_both_cookies_make_the_card_authenticated(self):
+        self.ui.clipboard = "abc12345"
+        self.entry("Paste aid from clipboard").run()
+        self.ui.clipboard = "k" * 40
+        self.entry("Paste __Secure-session from clipboard").run()
+
+        self.assertTrue(self.provider.is_authenticated())
+
+    def test_clipboard_junk_is_refused(self):
+        self.ui.clipboard = "hello world"
+
+        self.entry("Paste aid from clipboard").run()
+
+        self.assertEqual(self.saved_aid, [])
+        self.assertEqual(self.provider.message, "The clipboard does not look like an aid cookie")
+
+    def test_a_short_aid_is_refused(self):
+        self.ui.clipboard = "abc"
+
+        self.entry("Paste aid from clipboard").run()
+
+        self.assertEqual(self.saved_aid, [])
+
+    def test_the_prompt_explains_where_to_find_the_cookies(self):
+        self.ui.answers = ["a" * 20, "s" * 40]
+
+        self.provider.primary_action().run()
+
+        self.assertEqual(len(self.ui.prompts), 2)
+        title, prompt, secret = self.ui.prompts[0]
+        self.assertEqual(title, "Ollama aid cookie")
+        self.assertIn("DevTools", prompt)
+        self.assertTrue(secret)
+        title, prompt, secret = self.ui.prompts[1]
+        self.assertEqual(title, "Ollama __Secure-session cookie")
+        self.assertTrue(secret)
+        self.assertEqual(self.saved_aid, ["a" * 20])
+        self.assertEqual(self.saved_session, ["s" * 40])
+
+    def test_cancelling_the_first_prompt_changes_nothing(self):
+        self.ui.answer = None
+
+        self.provider.primary_action().run()
+
+        self.assertEqual(self.saved_aid, [])
+        self.assertEqual(self.saved_session, [])
+        self.assertEqual(self.provider.message, "")
+
+    def test_cancelling_the_second_prompt_keeps_the_aid(self):
+        self.ui.answers = ["a" * 20, None]
+
+        self.provider.primary_action().run()
+
+        self.assertEqual(self.saved_aid, ["a" * 20])
+        self.assertEqual(self.saved_session, [])
+        self.assertEqual(self.provider.message, "aid cookie saved")
+
+    def test_a_rejected_session_signs_the_card_out(self):
+        self.ui.answers = ["a" * 20, "s" * 40]
+        self.provider.primary_action().run()
+
+        with patch(
+            "llm_meter.providers.ollama.provider.auth.delete_aid"
+        ) as delete_aid, patch(
+            "llm_meter.providers.ollama.provider.auth.delete_session"
+        ) as delete_session, patch(
+            "llm_meter.providers.ollama.provider.api.fetch_settings",
+            side_effect=ollama_api.AuthExpiredError("gone"),
+        ):
+            self.provider.refresh()
+
+        delete_aid.assert_called_once()
+        delete_session.assert_called_once()
+        self.assertIs(self.provider.state, State.SIGNED_OUT)
+        self.assertTrue(self.ui.notified)
+
+    def test_the_usage_page_opens(self):
+        self.entry("Open usage page").run()
+
+        self.assertEqual(self.ui.opened, [ollama_api.SETTINGS_PAGE])
 
 
 def cursor_usage(**overrides) -> cursor_api.UsageData:

@@ -63,6 +63,10 @@ class MoneyTests(unittest.TestCase):
     def test_percent_is_rounded_to_whole_numbers(self):
         self.assertEqual(fmt.percent(84.6), "85%")
 
+    def test_percent_keeps_decimals_when_asked(self):
+        self.assertEqual(fmt.percent(2.6, decimals=1), "2.6%")
+        self.assertEqual(fmt.percent(0.5, decimals=1), "0.5%")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -51,5 +51,5 @@ def money_compact(amount: float) -> str:
     return money(amount)
 
 
-def percent(value: float) -> str:
-    return f"{value:.0f}%"
+def percent(value: float, decimals: int = 0) -> str:
+    return f"{value:.{decimals}f}%"

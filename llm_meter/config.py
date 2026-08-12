@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _write_lock = threading.Lock()
 
 APP_DIR_NAME = ".llm-usage-meter"
-REFRESH_OPTIONS = (5, 10, 30, 60)
+REFRESH_OPTIONS = (10, 30, 60)
 DEFAULT_REFRESH_INTERVAL = 10
 
 

@@ -18,12 +18,14 @@ from .base import (
 )
 from .codex.provider import CodexProvider
 from .cursor.provider import CursorProvider
+from .ollama.provider import OllamaProvider
 from .opencode.provider import OpenCodeProvider
 
 PROVIDER_CLASSES: tuple[type[Provider], ...] = (
     CodexProvider,
     OpenCodeProvider,
     CursorProvider,
+    OllamaProvider,
 )
 
 __all__ = [

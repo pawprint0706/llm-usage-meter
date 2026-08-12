@@ -101,13 +101,13 @@ class ContentTests(PopupTestCase):
 
         tabs = self.tabs()
         self.assertIsNotNone(tabs)
-        self.assertEqual(tabs.count(), 3)
-        self.assertEqual(self.popup._tab_ids, ["codex", "opencode", "cursor"])
+        self.assertEqual(tabs.count(), 4)
+        self.assertEqual(self.popup._tab_ids, ["codex", "opencode", "cursor", "ollama"])
         self.assertEqual(
             [tabs.tabToolTip(i) for i in range(tabs.count())],
-            ["Codex", "OpenCode", "Cursor"],
+            ["Codex", "OpenCode", "Cursor", "Ollama"],
         )
-        self.assertEqual(len(self.cards()), 3)
+        self.assertEqual(len(self.cards()), 4)
 
     def test_tab_order_follows_the_saved_provider_order(self):
         self.cfg.provider_order = ["opencode", "codex"]
@@ -117,10 +117,10 @@ class ContentTests(PopupTestCase):
 
         self.popup.rebuild()
 
-        self.assertEqual(self.popup._tab_ids, ["opencode", "codex", "cursor"])
+        self.assertEqual(self.popup._tab_ids, ["opencode", "codex", "cursor", "ollama"])
         self.assertEqual(
             [self.tabs().tabToolTip(i) for i in range(self.tabs().count())],
-            ["OpenCode", "Codex", "Cursor"],
+            ["OpenCode", "Codex", "Cursor", "Ollama"],
         )
 
     def test_a_disabled_service_is_left_out(self):
@@ -130,12 +130,13 @@ class ContentTests(PopupTestCase):
         self.popup.rebuild()
 
         tabs = self.tabs()
-        self.assertEqual(tabs.count(), 2)
-        self.assertEqual(self.popup._tab_ids, ["opencode", "cursor"])
+        self.assertEqual(tabs.count(), 3)
+        self.assertEqual(self.popup._tab_ids, ["opencode", "cursor", "ollama"])
         self.assertEqual(
-            [tabs.tabToolTip(i) for i in range(tabs.count())], ["OpenCode", "Cursor"]
+            [tabs.tabToolTip(i) for i in range(tabs.count())],
+            ["OpenCode", "Cursor", "Ollama"],
         )
-        self.assertEqual(len(self.cards()), 2)
+        self.assertEqual(len(self.cards()), 3)
 
     def test_every_section_is_rendered(self):
         self.make_ready()
@@ -323,7 +324,7 @@ class SizeTests(PopupTestCase):
 
         self.popup.rebuild()
 
-        self.assertEqual(len(self.cards()), 3)
+        self.assertEqual(len(self.cards()), 4)
         self.assertEqual(self.popup.height(), tall)
 
     def test_returning_to_a_shorter_tab_does_not_leave_a_taller_panel(self):

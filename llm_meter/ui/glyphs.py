@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _CODEX_ICON = "codex-blossom.ico"
 _CURSOR_ICON = "cursor-cube.svg"
+_OLLAMA_ICON = "ollama-icon.svg"
 
 # OpenCode logomark geometry in the official 512x512 viewBox: a frame with an
 # interior hole whose lower two thirds hold a dimmer inset panel.
@@ -202,6 +203,56 @@ def _cursor_pixmap(size: int, color: QColor) -> QPixmap:
     return _centered(_tint(scaled, color), size)
 
 
+@functools.lru_cache(maxsize=1)
+def _ollama_mask() -> QImage | None:
+    """Alpha mask of the official Ollama llama mark (SVG)."""
+    path = paths.asset(_OLLAMA_ICON)
+    if not path:
+        logger.warning("Bundled asset %s is missing", _OLLAMA_ICON)
+        return None
+    renderer = QSvgRenderer(path)
+    if not renderer.isValid():
+        logger.warning("Could not parse %s", path)
+        return None
+    view = renderer.viewBoxF()
+    if view.isEmpty():
+        view = QRectF(0, 0, 512, 512)
+    # Render large enough that downscales stay sharp in the popup and tray.
+    height = 512
+    width = max(1, round(height * view.width() / view.height()))
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    renderer.render(painter, QRectF(0, 0, width, height))
+    painter.end()
+
+    mask = QImage(width, height, QImage.Format.Format_ARGB32)
+    mask.fill(Qt.transparent)
+    left, top, right, bottom = width, height, -1, -1
+    for y in range(height):
+        for x in range(width):
+            pixel = image.pixelColor(x, y)
+            if pixel.alpha() <= 8:
+                continue
+            # The mark is a single black silhouette; keep alpha so tinting stays crisp.
+            mask.setPixelColor(x, y, QColor(0, 0, 0, pixel.alpha()))
+            left, top = min(left, x), min(top, y)
+            right, bottom = max(right, x), max(bottom, y)
+    if right < 0:
+        return None
+    return mask.copy(left, top, right - left + 1, bottom - top + 1)
+
+
+def _ollama_pixmap(size: int, color: QColor) -> QPixmap:
+    mask = _ollama_mask()
+    if mask is None:
+        return _fallback_pixmap(size, color)
+    scaled = mask.scaled(
+        size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+    )
+    return _centered(_tint(scaled, color), size)
+
+
 def _fallback_pixmap(size: int, color: QColor) -> QPixmap:
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
@@ -218,6 +269,7 @@ _BUILDERS = {
     "codex": _codex_pixmap,
     "opencode": _opencode_pixmap,
     "cursor": _cursor_pixmap,
+    "ollama": _ollama_pixmap,
 }
 
 

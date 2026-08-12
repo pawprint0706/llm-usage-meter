@@ -7,6 +7,7 @@
 - **Codex** (ChatGPT) — 플랜 사용량 윈도우, 구매한 크레딧 잔액, 사용량 한도 재설정권
 - **OpenCode** — Go 플랜 사용량(5시간 / 주간 / 월간)과 Zen 크레딧 잔액을 별도 섹션으로 구분
 - **Cursor** — 청구 주기 플랜 사용량(%)과 포함·보너스·온디맨드 지출
+- **Ollama** — 클라우드 세션·주간 사용량(%), 모델별 요청 수, 추가 사용량 잔액
 
 다른 서비스는 provider 패키지를 추가하는 방식으로 확장합니다([서비스 추가](#서비스-추가) 참고).
 
@@ -81,7 +82,7 @@ UI 언어는 OS 언어를 따릅니다(한국어 또는 영어). `LLM_METER_LANG
 
 ### 설정 메뉴 (`⚙`)
 
-- **새로고침 주기**: 5분 / 10분 / 30분 / 60분
+- **새로고침 주기**: 10분 / 30분 / 60분
 - **표시할 서비스**: 탭으로 표시할 서비스 선택
 - **탭 순서**: 각 서비스를 앞/뒤로 옮겨 탭 순서를 바꿉니다
 - **로그인 시 자동 시작**: OS 로그인 시 자동 실행
@@ -197,9 +198,40 @@ Cursor 대시보드 사용량·지출 API는 공개 OAuth가 아니라 `WorkosCu
 
 붙여넣은 토큰만 앱 credential 저장소에 보관하며, 메뉴의 **로그아웃**으로 제거할 수 있습니다. 로컬 IDE/CLI 세션을 쓰는 경우에는 로그아웃 항목이 나오지 않습니다. 세션이 만료되면 알림을 띄우고, 붙여넣은 토큰이 있으면 제거한 뒤 다시 등록하거나 Cursor에 다시 로그인하라고 안내합니다.
 
+## Ollama 카드
+
+```text
+Ollama  PRO                                     ⋯
+클라우드 사용량
+  세션 사용량                                   5%
+  ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▭▭   1시간 후 초기화
+  주간 사용량                                   1%
+  ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▭   4일 후 초기화
+  deepseek-v4-flash:0731              213회
+추가 사용량
+  잔액                                        $0
+```
+
+- **클라우드 사용량**: 세션(5시간)과 주간 사용률(%)과 초기화 카운트다운을 표시하고, 이번 주 모델별 요청 수를 함께 나열합니다.
+- **추가 사용량**: 플랜 포함 사용량을 소진한 뒤 쓰는 잔액을 표시합니다. 잔액이 0이면 흐리게 표시합니다.
+
+사용량 페이지는 `⋯` 메뉴의 **사용량 페이지 열기**로만 이동합니다. 로그인 전에는 세션 쿠키 붙여넣기/입력도 같은 메뉴에 있고, 로그인 후에는 로그아웃만 남습니다.
+
+### Ollama 세션 쿠키
+
+Ollama 설정 페이지는 공개 API가 없어 브라우저 세션 쿠키를 그대로 사용합니다. 브라우저 쿠키를 직접 읽는 방식은 지원하지 않습니다. `aid`와 `__Secure-session` 쿠키를 각각 **클립보드에서 붙여넣기** 또는 **직접 입력** 으로 등록합니다.
+
+1. <https://ollama.com/settings> 에서 로그인합니다.
+2. 개발자 도구(F12) → 애플리케이션/저장소 → 쿠키 → `https://ollama.com`
+3. `aid` 쿠키와 `__Secure-session` 쿠키의 값을 각각 복사합니다.
+4. 카드의 **세션 쿠키 입력...** 을 누르면 두 쿠키를 순서대로 묻습니다. (`aid=`, `__Secure-session=`, 따옴표, 끝의 `;`는 자동으로 정리됩니다.)
+5. 한쪽만 갱신하려면 **클립보드에서 aid 붙여넣기** / **클립보드에서 __Secure-session 붙여넣기** 메뉴를 사용합니다.
+
+세션이 만료되면 저장된 쿠키를 지우고 알림을 띄웁니다.
+
 ## 자격 증명 보안
 
-Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰은 OS 보안 저장소에 보관합니다.
+Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰, Ollama 세션 쿠키는 OS 보안 저장소에 보관합니다.
 
 - **macOS**: 키체인
 - **Windows**: Windows Credential Manager
@@ -214,7 +246,7 @@ Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰
 ```json
 {
   "refresh_interval": 10,
-  "provider_order": ["codex", "opencode", "cursor"],
+  "provider_order": ["codex", "opencode", "cursor", "ollama"],
   "providers": {
     "codex": { "enabled": true },
     "opencode": {
@@ -222,12 +254,13 @@ Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰
       "workspace_id": "wrk_...",
       "limits": { "rolling": 12, "weekly": 30, "monthly": 60 }
     },
-    "cursor": { "enabled": true }
+    "cursor": { "enabled": true },
+    "ollama": { "enabled": true }
   }
 }
 ```
 
-- `refresh_interval`: API 갱신 주기(분). `5`, `10`, `30`, `60` 중 하나이며 설정 메뉴에서도 변경할 수 있습니다.
+- `refresh_interval`: API 갱신 주기(분). `10`, `30`, `60` 중 하나이며 설정 메뉴에서도 변경할 수 있습니다.
 - `provider_order`: 탭에 표시되는 서비스 순서. 설정 메뉴의 **탭 순서**로도 바꿀 수 있습니다. 목록에 없는 새 서비스는 뒤에 붙습니다.
 - `providers.<id>.enabled`: 탭 표시 여부.
 - `providers.opencode.limits`: Go 플랜의 기간별 금액 한도(달러). 요금제가 다르면 이 값을 조정하세요.
@@ -304,7 +337,7 @@ Windows:
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-테스트는 Codex 사용량·크레딧·재설정권 파싱과 401/403 단일 재시도, OpenCode 콘솔 SSR 파서와 Zen 빌링 추출, Cursor 사용량·지출 파싱과 세션 토큰 정리, 자격 증명 압축·분할 저장, 설정 파일 읽기/쓰기, 금액·기간 표시, 팝업 렌더링(오프스크린 Qt)을 검사합니다. 실제 계정이나 네트워크 호출은 사용하지 않습니다.
+테스트는 Codex 사용량·크레딧·재설정권 파싱과 401/403 단일 재시도, OpenCode 콘솔 SSR 파서와 Zen 빌링 추출, Cursor 사용량·지출 파싱과 세션 토큰 정리, Ollama 설정 페이지 파싱과 세션 쿠키 정리, 자격 증명 압축·분할 저장, 설정 파일 읽기/쓰기, 금액·기간 표시, 팝업 렌더링(오프스크린 Qt)을 검사합니다. 실제 계정이나 네트워크 호출은 사용하지 않습니다.
 
 ## 문제 해결
 
@@ -314,6 +347,8 @@ Windows:
 - **Codex 로그인이 만료됨**: 로그아웃한 뒤 다시 로그인하세요. 취소·만료·폐기된 refresh token은 복구할 수 없습니다.
 - **OpenCode 세션이 만료됨**: `auth` 쿠키를 다시 복사해 세션 키를 등록하세요. 콘솔에서 로그아웃하면 키도 무효화됩니다.
 - **OpenCode 사용량을 읽지 못함**: 콘솔 HTML 구조가 바뀐 경우입니다. 마지막 응답이 `~/.llm-usage-meter/opencode-last-fetch.html`에 저장되니 로그와 함께 확인하세요.
+- **Ollama 세션이 만료됨**: `aid`·`__Secure-session` 쿠키를 다시 복사해 등록하세요. ollama.com에서 로그아웃하면 쿠키도 무효화됩니다.
+- **Ollama 사용량을 읽지 못함**: 설정 페이지 HTML 구조가 바뀐 경우입니다. 마지막 응답이 `~/.llm-usage-meter/ollama-last-fetch.html`에 저장되니 로그와 함께 확인하세요.
 - **Cursor 사용량이 비어 있음**: Cursor IDE/CLI에 로그인돼 있는지 확인하거나, `WorkosCursorSessionToken`을 다시 붙여넣으세요.
 - **Cursor 세션이 만료됨**: Cursor 웹/IDE에 다시 로그인한 뒤 앱을 새로고침하거나, 새 쿠키를 붙여넣으세요.
 - **네트워크 오류**: 로그인은 유지되며 다음 주기에 자동 재시도합니다.
@@ -331,12 +366,13 @@ GET https://opencode.ai/auth, /auth/status
 GET https://cursor.com/api/usage-summary
 POST https://cursor.com/api/dashboard/get-hard-limit
 POST https://cursor.com/api/dashboard/get-plan-info
+GET https://ollama.com/settings                        (SSR HTML 파싱)
 ```
 
 각 서비스는 엔드포인트, 응답 필드, 필요한 헤더, 인증 방식, 접근 정책을 예고 없이 변경하거나 제거할 수 있습니다. 로컬 설치가 그대로여도 앱이 동작하지 않을 수 있으며, 이는 이 프로젝트가 가진 본질적인 유지보수·호환성 위험입니다.
 
 ## 상표 및 비공식 앱 고지
 
-LLM Usage Meter는 독립적으로 제작된 유틸리티입니다. OpenAI, OpenCode, Cursor의 공식 앱이 아니며, 해당 회사가 보증·후원하거나 제휴한 프로젝트가 아닙니다.
+LLM Usage Meter는 독립적으로 제작된 유틸리티입니다. OpenAI, OpenCode, Cursor, Ollama의 공식 앱이 아니며, 해당 회사가 보증·후원하거나 제휴한 프로젝트가 아닙니다.
 
-ChatGPT, Codex, OpenAI, Blossom 로고와 OpenCode·Cursor 관련 표장은 각 소유자의 상표 또는 자산입니다. `assets/codex-blossom.ico`와 `assets/cursor-cube.svg`는 모니터링 대상 서비스를 카드에서 식별하기 위한 목적으로만 사용하며, 단색 glyph로 비율을 유지해 크기만 조정합니다. 이 앱 자체의 브랜드로 표시하지 않습니다.
+ChatGPT, Codex, OpenAI, Blossom 로고와 OpenCode·Cursor·Ollama 관련 표장은 각 소유자의 상표 또는 자산입니다. `assets/codex-blossom.ico`, `assets/cursor-cube.svg`, `assets/ollama-icon.svg`는 모니터링 대상 서비스를 카드에서 식별하기 위한 목적으로만 사용하며, 단색 glyph로 비율을 유지해 크기만 조정합니다. 이 앱 자체의 브랜드로 표시하지 않습니다.

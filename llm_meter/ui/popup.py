@@ -108,6 +108,11 @@ class _ActionButton(QToolButton):
         color = QColor(self._palette.text if hover else self._palette.subtle)
         self.setIcon(_action_icon(self._glyph, color, HEADER_ACTION_SIZE))
 
+    def retheme(self, palette: theme.Palette) -> None:
+        """Repaint the glyph after a light/dark switch."""
+        self._palette = palette
+        self._paint(hover=self.underMouse())
+
 
 def _action_icon(glyph: str, color: QColor, size: int) -> QIcon:
     """Render ``glyph`` ink-cropped so it fills ``size``×``size`` with no side bearings."""
@@ -172,6 +177,8 @@ class PopupWindow(QWidget):
         self._selected_provider_id: Optional[str] = None
         self._tab_ids: list[str] = []
         self._stamp_label: Optional[QLabel] = None
+        self._title_label: Optional[QLabel] = None
+        self._styled_dark: Optional[bool] = None
         self._ignore_outside_until = 0.0
         self._mouse_monitor = None
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -294,6 +301,8 @@ class PopupWindow(QWidget):
             return
         palette = theme.current()
         self._apply_panel_style(palette)
+        retheme = self._styled_dark is not None and self._styled_dark != palette.dark
+        self._styled_dark = palette.dark
 
         # Prefer in-place updates while the panel is open: destroying the
         # QTabWidget on Windows leaves the current page's pixels stuck until the
@@ -301,6 +310,14 @@ class PopupWindow(QWidget):
         if self._tabs_match_structure():
             self._update_header_stamp(palette)
             self._replace_cards(palette)
+            if retheme:
+                # The title, header actions and tab labels bake the palette in
+                # at build time; recolour them or they keep the previous
+                # theme's colours across the in-place update.
+                self._retheme_header(palette)
+                tabs = self._content.findChild(QTabWidget)
+                if tabs is not None:
+                    self._refresh_tab_labels(tabs, palette)
         else:
             self._build_header(palette)
             self._build_tabs(palette)
@@ -312,9 +329,11 @@ class PopupWindow(QWidget):
     def _build_header(self, palette: theme.Palette) -> None:
         self._clear(self._header)
         self._stamp_label = None
+        self._title_label = None
         title = _label(
             self._panel, tr("LLM 사용량", "LLM usage"), palette.text, 0, QFont.Weight.DemiBold
         )
+        self._title_label = title
         self._add(self._header, title)
         updated = self._updated_text()
         if updated:
@@ -331,6 +350,15 @@ class PopupWindow(QWidget):
         self._add(actions, refresh)
         self._add(actions, settings)
         self._header.addLayout(actions)
+
+    def _retheme_header(self, palette: theme.Palette) -> None:
+        """Recolour header widgets that the in-place update path leaves behind."""
+        if self._title_label is not None:
+            self._title_label.setStyleSheet(
+                f"color: {palette.text}; background: transparent;"
+            )
+        for button in self._panel.findChildren(_ActionButton):
+            button.retheme(palette)
 
     def _update_header_stamp(self, palette: theme.Palette) -> None:
         """Swap only the stamp text so a refresh does not rebuild the tool buttons."""

@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QColor, QGuiApplication
-from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabBar, QTabWidget
 
 from tests._support import FakeUi, install_keyring_stub
 from tests.test_providers import codex_usage, console
@@ -22,8 +22,8 @@ from llm_meter.config import Config
 from llm_meter.providers import build_providers
 from llm_meter.providers.base import State
 from llm_meter.providers.opencode.provider import Loaded
-from llm_meter.ui import glyphs
-from llm_meter.ui.popup import PopupWindow
+from llm_meter.ui import glyphs, theme
+from llm_meter.ui.popup import PopupWindow, _ActionButton
 from llm_meter.ui.widgets import ProviderCard
 
 _qt_app = None
@@ -254,6 +254,30 @@ class ContentTests(PopupTestCase):
         card_after = self.cards()[tabs_before.currentIndex()]
         self.assertIsNot(card_after, card_before)
         self.assertIn("91%", self.labels())
+
+    def test_a_theme_switch_recolors_the_header_and_tab_labels(self):
+        """Regression: the in-place rebuild kept the previous theme's colours
+        for the title, the header actions and the pre-composited tab labels."""
+        self.make_ready()
+        self.popup.show_near(QRect(600, 0, 24, 24))
+        self.addCleanup(self.popup.hide)
+
+        with patch("llm_meter.ui.popup.theme.current", return_value=theme.DARK):
+            self.popup.rebuild()
+        bar = self.tabs().tabBar()
+        tab_label_before = bar.tabButton(0, QTabBar.ButtonPosition.LeftSide)
+        title_before = self.popup._title_label
+        self.assertIn(theme.DARK.text, title_before.styleSheet())
+
+        with patch("llm_meter.ui.popup.theme.current", return_value=theme.LIGHT):
+            self.popup.rebuild()
+
+        self.assertIn(theme.LIGHT.text, self.popup._title_label.styleSheet())
+        self.assertIsNot(
+            bar.tabButton(0, QTabBar.ButtonPosition.LeftSide), tab_label_before
+        )
+        for button in self.popup._panel.findChildren(_ActionButton):
+            self.assertIs(button._palette, theme.LIGHT)
 
     def test_the_active_tab_is_shorter_than_both_cards_stacked(self):
         self.make_ready()

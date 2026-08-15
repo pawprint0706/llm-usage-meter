@@ -117,8 +117,8 @@ if sys.platform == "darwin":
             "CFBundleName": APP_NAME,
             "CFBundleDisplayName": APP_NAME,
             "CFBundleIdentifier": "local.llm-usage-meter",
-            "CFBundleShortVersionString": "1.0.11",
-            "CFBundleVersion": "1.0.11",
+            "CFBundleShortVersionString": "1.0.12",
+            "CFBundleVersion": "1.0.12",
             "LSMinimumSystemVersion": "12.0",
             "LSUIElement": True,  # menu-bar accessory; no Dock icon
             "NSHighResolutionCapable": True,

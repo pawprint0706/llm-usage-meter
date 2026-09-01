@@ -476,17 +476,13 @@ class OpenCodeSessionTests(unittest.TestCase):
 def ollama_settings(**overrides) -> ollama_api.SettingsData:
     data = ollama_api.SettingsData(
         plan="pro",
-        session=ollama_api.UsageWindow(
-            label="Session usage",
-            percent=2.6,
-            reset_at=datetime.now(timezone.utc) + timedelta(hours=1),
-            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 36)],
-        ),
-        weekly=ollama_api.UsageWindow(
-            label="Weekly usage",
-            percent=0.5,
+        monthly=ollama_api.UsageWindow(
+            label="Monthly usage",
+            used=0.03,
+            total=60.0,
+            percent=0.05,
             reset_at=datetime.now(timezone.utc) + timedelta(days=4),
-            models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 375)],
+            models=[ollama_api.ModelUsage("glm-5.3-flash", 14)],
         ),
         balance=0.0,
         balance_text="$0",
@@ -516,38 +512,25 @@ class OllamaRenderTests(unittest.TestCase):
         self.assertEqual(snapshot.sections[0].url, ollama_api.SETTINGS_PAGE)
         self.assertEqual(snapshot.badge, "pro")
 
-    def test_each_window_shows_its_percentage_and_countdown(self):
+    def test_the_monthly_window_shows_its_dollars_and_countdown(self):
         metrics = self.render().sections[0].metrics
 
-        self.assertEqual(metrics[0].label, "Session usage")
-        self.assertEqual(metrics[0].value, "2.6%")
-        self.assertAlmostEqual(metrics[0].percent, 2.6)
+        self.assertEqual(metrics[0].label, "Monthly usage")
+        self.assertEqual(metrics[0].value, "$0.03 of $60")
+        self.assertAlmostEqual(metrics[0].percent, 0.05)
         self.assertIn("resets in", metrics[0].detail)
-        self.assertEqual(metrics[1].label, "Weekly usage")
-        self.assertEqual(metrics[1].value, "0.5%")
-        self.assertIn("resets in", metrics[1].detail)
 
-    def test_models_are_listed_after_the_windows(self):
+    def test_models_are_listed_after_the_window(self):
         metrics = self.render().sections[0].metrics
 
-        self.assertEqual(metrics[2].label, "deepseek-v4-flash:0731")
-        self.assertEqual(metrics[2].value, "375 req")
-        self.assertTrue(metrics[2].muted)
+        self.assertEqual(metrics[1].label, "glm-5.3-flash")
+        self.assertEqual(metrics[1].value, "14 req")
+        self.assertTrue(metrics[1].muted)
 
-    def test_models_fall_back_to_the_session_meter_without_weekly(self):
-        data = ollama_settings(
-            session=ollama_api.UsageWindow(
-                label="Session usage",
-                percent=2.6,
-                reset_at=datetime.now(timezone.utc) + timedelta(hours=1),
-                models=[ollama_api.ModelUsage("deepseek-v4-flash:0731", 36)],
-            ),
-            weekly=None,
-        )
-
-        metrics = self.render(data).sections[0].metrics
-
-        self.assertEqual(metrics[1].value, "36 req")
+    def test_korean_labels_use_the_slash_form(self):
+        with patch.dict("os.environ", {"LLM_METER_LANG": "ko"}):
+            metrics = self.render().sections[0].metrics
+            self.assertEqual(metrics[0].value, "$0.03 / $60")
 
     def test_a_zero_balance_is_muted(self):
         metric = self.render().sections[1].metrics[0]
@@ -569,7 +552,7 @@ class OllamaRenderTests(unittest.TestCase):
         self.assertEqual(section.note, "Could not fetch the balance")
 
     def test_a_missing_usage_is_explained(self):
-        snapshot = self.render(ollama_settings(session=None, weekly=None))
+        snapshot = self.render(ollama_settings(monthly=None))
 
         section = snapshot.sections[0]
         self.assertEqual(section.metrics, [])
@@ -578,17 +561,19 @@ class OllamaRenderTests(unittest.TestCase):
         )
         self.assertIsNone(snapshot.gauge_percent)
 
-    def test_the_gauge_follows_the_busiest_window(self):
+    def test_the_gauge_follows_the_monthly_usage(self):
         snapshot = self.render()
 
-        self.assertAlmostEqual(snapshot.gauge_percent, 2.6)
+        self.assertAlmostEqual(snapshot.gauge_percent, 0.05)
 
     def test_countdowns_shrink_as_time_passes(self):
         loaded = OllamaLoaded(
             data=ollama_settings(
-                session=ollama_api.UsageWindow(
-                    label="Session usage",
-                    percent=2.6,
+                monthly=ollama_api.UsageWindow(
+                    label="Monthly usage",
+                    used=0.03,
+                    total=60.0,
+                    percent=0.05,
                     reset_at=datetime.now(timezone.utc) + timedelta(minutes=31),
                     models=[],
                 )

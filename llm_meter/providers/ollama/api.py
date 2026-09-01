@@ -5,9 +5,9 @@ in the HTML of ``GET /settings`` — there is no JSON API. The page is fetched
 with the ``aid`` and ``__Secure-session`` cookies and parsed with regexes
 anchored on stable data attributes:
 
-    aria-label="Session usage 2.6% used"
-    data-time="2026-08-12T02:00:00Z"          (reset instant, UTC)
-    data-usage-segment data-model="..." data-requests="131"
+    aria-label="Monthly usage $0.03 of $60 used"   (included-usage meter)
+    data-time="2026-10-01T00:38:02Z"               (reset instant, UTC)
+    data-usage-segment data-model="..." data-requests="14"
     Balance remaining ... $0
 """
 
@@ -26,8 +26,10 @@ SETTINGS_PAGE = "https://ollama.com/settings"
 
 _REDIRECT_CODES = (301, 302, 303, 307, 308)
 
+# The included-usage meter exposes dollars, not percent: the plan grants a
+# monthly credit and the bar segments are per-model shares of it.
 _METER_RE = re.compile(
-    r'aria-label="(Session usage|Weekly usage) ([0-9.]+)% used"'
+    r'aria-label="(Monthly usage) \$([0-9.]+) of \$([0-9.]+) used"'
 )
 _RESET_RE = re.compile(r'data-time="([^"]+)"')
 _SEGMENT_RE = re.compile(
@@ -62,6 +64,8 @@ class ParseError(ApiError):
 @dataclass
 class UsageWindow:
     label: str
+    used: float
+    total: float
     percent: float
     reset_at: Optional[datetime]
     models: list["ModelUsage"]
@@ -76,8 +80,7 @@ class ModelUsage:
 @dataclass
 class SettingsData:
     plan: Optional[str] = None
-    session: Optional[UsageWindow] = None
-    weekly: Optional[UsageWindow] = None
+    monthly: Optional[UsageWindow] = None
     balance: Optional[float] = None
     balance_text: Optional[str] = None
     error: Optional[str] = None
@@ -121,8 +124,8 @@ def parse_settings(html: str) -> SettingsData:
     resets = list(_RESET_RE.finditer(html))
     segments = list(_SEGMENT_RE.finditer(html))
 
-    # Each meter carries its own model segments, and the session and weekly
-    # totals can differ, so assign every segment to the meter it appears in.
+    # Each meter carries its own model segments, so assign every segment to
+    # the meter it appears after.
     by_meter: dict[int, list[ModelUsage]] = {}
     for segment in segments:
         meter_index = None
@@ -139,18 +142,24 @@ def parse_settings(html: str) -> SettingsData:
 
     for index, match in enumerate(meters):
         label = match.group(1)
-        percent = float(match.group(2))
-        reset = _parse_reset(resets[index].group(1)) if index < len(resets) else None
-        window = UsageWindow(
-            label=label,
-            percent=percent,
-            reset_at=reset,
-            models=by_meter.get(index, []),
+        used = float(match.group(2))
+        total = float(match.group(3))
+        percent = used / total * 100 if total else 0.0
+        # The reset instant is the first data-time after the meter; the ones
+        # further down belong to the recent-requests list.
+        reset = next(
+            (_parse_reset(reset.group(1)) for reset in resets if reset.start() > match.start()),
+            None,
         )
-        if label == "Session usage":
-            data.session = window
-        elif label == "Weekly usage":
-            data.weekly = window
+        if label == "Monthly usage":
+            data.monthly = UsageWindow(
+                label=label,
+                used=used,
+                total=total,
+                percent=percent,
+                reset_at=reset,
+                models=by_meter.get(index, []),
+            )
 
     balance = _BALANCE_RE.search(html)
     if balance:
@@ -158,7 +167,7 @@ def parse_settings(html: str) -> SettingsData:
         data.balance_text = text
         data.balance = _parse_money(text)
 
-    if data.session is None and data.weekly is None and data.balance is None:
+    if data.monthly is None and data.balance is None:
         data.error = "no usage data found in the HTML"
     return data
 

@@ -1,4 +1,4 @@
-"""Ollama Cloud provider: session/weekly usage, model stats and extra-usage balance."""
+"""Ollama Cloud provider: monthly included usage, model stats and extra-usage balance."""
 
 import logging
 import time
@@ -102,8 +102,8 @@ class OllamaProvider(Provider):
         )
 
     def _usage_section(self, data: Loaded) -> Section:
-        windows = [window for window in (data.data.session, data.data.weekly) if window]
-        if not windows:
+        monthly = data.data.monthly
+        if monthly is None:
             return Section(
                 title=tr("클라우드 사용량", "Cloud usage"),
                 url=api.SETTINGS_PAGE,
@@ -113,38 +113,32 @@ class OllamaProvider(Provider):
                 ),
             )
         metrics: list[Metric] = []
-        for window in windows:
-            label = tr(
-                "세션 사용량" if window.label == "Session usage" else "주간 사용량",
-                "Session usage" if window.label == "Session usage" else "Weekly usage",
+        detail = None
+        if monthly.reset_at is not None:
+            remaining = (monthly.reset_at - datetime.now(monthly.reset_at.tzinfo)).total_seconds()
+            span = fmt.duration(max(0.0, remaining))
+            detail = tr(f"{span} 후 초기화", f"resets in {span}")
+        metrics.append(
+            Metric(
+                label=tr("월간 사용량", "Monthly usage"),
+                value=tr(
+                    f"{fmt.money(monthly.used)} / {fmt.money_compact(monthly.total)}",
+                    f"{fmt.money(monthly.used)} of {fmt.money_compact(monthly.total)}",
+                ),
+                percent=monthly.percent,
+                detail=detail,
             )
-            detail = None
-            if window.reset_at is not None:
-                remaining = (window.reset_at - datetime.now(window.reset_at.tzinfo)).total_seconds()
-                span = fmt.duration(max(0.0, remaining))
-                detail = tr(f"{span} 후 초기화", f"resets in {span}")
+        )
+        # The webpage lists "Models used this month" — the monthly meter's
+        # per-model request counts.
+        for model in monthly.models:
             metrics.append(
                 Metric(
-                    label=label,
-                    value=fmt.percent(window.percent, decimals=1),
-                    percent=window.percent,
-                    detail=detail,
+                    label=model.name,
+                    value=tr(f"{model.requests}회", f"{model.requests} req"),
+                    muted=True,
                 )
             )
-        # The webpage lists "Models used this week" — the weekly meter's
-        # per-model request counts, which can differ from the session's.
-        models = data.data.weekly.models if data.data.weekly else []
-        if not models and data.data.session:
-            models = data.data.session.models
-        if models:
-            for model in models:
-                metrics.append(
-                    Metric(
-                        label=model.name,
-                        value=tr(f"{model.requests}회", f"{model.requests} req"),
-                        muted=True,
-                    )
-                )
         return Section(
             title=tr("클라우드 사용량", "Cloud usage"),
             metrics=metrics,
@@ -169,10 +163,7 @@ class OllamaProvider(Provider):
         return Section(title=title, metrics=metrics, url=api.SETTINGS_PAGE)
 
     def _gauge_percent(self, data: api.SettingsData) -> Optional[float]:
-        percents = [
-            window.percent for window in (data.session, data.weekly) if window
-        ]
-        return max(percents) if percents else None
+        return data.monthly.percent if data.monthly else None
 
     # ------------------------------------------------------------------ menu
 

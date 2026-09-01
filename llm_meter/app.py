@@ -13,6 +13,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QIcon
 from PySide6.QtWidgets import QApplication, QInputDialog, QLineEdit, QMenu, QSystemTrayIcon
 
 from . import autostart, config, platform_mac
+from . import __version__
 from .i18n import tr
 from .providers import MenuEntry, Provider, State, build_providers, known_provider_ids
 from .ui import glyphs, theme
@@ -22,6 +23,7 @@ from .ui.widgets import style_menu
 logger = logging.getLogger(__name__)
 
 APP_TITLE = "LLM Usage Meter"
+RELEASES_PAGE = "https://github.com/pawprint0706/llm-usage-meter/releases"
 TRAY_ICON_SIZES = (16, 18, 20, 22, 24, 32, 44, 64)
 UI_TICK_MS = 60_000
 THEME_POLL_MS = 5_000
@@ -398,10 +400,14 @@ class MeterApp(QObject):
         autostart_action.setChecked(autostart.is_enabled())
         autostart_action.triggered.connect(self._toggle_autostart)
 
-        menu.addSeparator()
         data_action = menu.addAction(tr("데이터 폴더 열기", "Open data folder"))
         data_action.triggered.connect(lambda: self._reveal(config.config_dir()))
-        menu.addSeparator()
+        version_action = menu.addAction(
+            tr(f"버전 {__version__}", f"Version {__version__}")
+        )
+        version_action.triggered.connect(
+            lambda: webbrowser.open(RELEASES_PAGE)
+        )
         quit_action = menu.addAction(tr("종료", "Quit"))
         quit_action.triggered.connect(self.quit)
 

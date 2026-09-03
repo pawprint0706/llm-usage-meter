@@ -28,6 +28,7 @@ def _uninstall() -> None:
     from .providers.codex import auth as codex_auth
     from .providers.cursor import auth as cursor_auth
     from .providers.ollama import auth as ollama_auth
+    from .providers.openrouter import auth as openrouter_auth
     from .providers.opencode import auth as opencode_auth
 
     autostart.disable()
@@ -37,6 +38,7 @@ def _uninstall() -> None:
         cursor_auth.delete_pasted_session_token,
         ollama_auth.delete_aid,
         ollama_auth.delete_session,
+        openrouter_auth.delete_key,
     ):
         try:
             remove()

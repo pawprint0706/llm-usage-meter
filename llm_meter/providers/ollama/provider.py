@@ -94,7 +94,11 @@ class OllamaProvider(Provider):
         return Loaded(data=data, monotonic=time.monotonic())
 
     def render(self, data: Loaded) -> Snapshot:
-        sections = [self._usage_section(data), self._balance_section(data.data)]
+        sections = [
+            self._usage_section(data),
+            self._balance_section(data.data),
+            *self._model_section(data.data),
+        ]
         return Snapshot(
             sections=sections,
             badge=data.data.plan,
@@ -105,7 +109,7 @@ class OllamaProvider(Provider):
         monthly = data.data.monthly
         if monthly is None:
             return Section(
-                title=tr("클라우드 사용량", "Cloud usage"),
+                title=tr("기본 사용량", "Included usage"),
                 url=api.SETTINGS_PAGE,
                 note=tr(
                     "사용량 정보 가져오기 실패. 구독 상태를 확인하세요",
@@ -118,32 +122,43 @@ class OllamaProvider(Provider):
             remaining = (monthly.reset_at - datetime.now(monthly.reset_at.tzinfo)).total_seconds()
             span = fmt.duration(max(0.0, remaining))
             detail = tr(f"{span} 후 초기화", f"resets in {span}")
+        # The fuel gauge reads what is left: the text matches the bar.
+        left = max(0.0, monthly.total - monthly.used)
         metrics.append(
             Metric(
-                label=tr("월간 사용량", "Monthly usage"),
+                label=tr("월간", "Monthly"),
                 value=tr(
-                    f"{fmt.money(monthly.used)} / {fmt.money_compact(monthly.total)}",
-                    f"{fmt.money(monthly.used)} of {fmt.money_compact(monthly.total)}",
+                    f"{fmt.money(left)} / {fmt.money_compact(monthly.total)}",
+                    f"{fmt.money(left)} of {fmt.money_compact(monthly.total)}",
                 ),
                 percent=monthly.percent,
                 detail=detail,
             )
         )
-        # The webpage lists "Models used this month" — the monthly meter's
-        # per-model request counts.
-        for model in monthly.models:
-            metrics.append(
-                Metric(
-                    label=model.name,
-                    value=tr(f"{model.requests}회", f"{model.requests} req"),
-                    muted=True,
-                )
-            )
         return Section(
-            title=tr("클라우드 사용량", "Cloud usage"),
+            title=tr("기본 사용량", "Included usage"),
             metrics=metrics,
             url=api.SETTINGS_PAGE,
         )
+
+    def _model_section(self, data: api.SettingsData) -> list[Section]:
+        """Per-model request counts, below the extra-usage balance.
+
+        The webpage lists "Models used this month" — the monthly meter's
+        per-model counts. No title of its own: the gap above separates it.
+        """
+        monthly = data.monthly
+        if monthly is None or not monthly.models:
+            return []
+        metrics = [
+            Metric(
+                label=model.name,
+                value=tr(f"{model.requests}회", f"{model.requests} req"),
+                muted=True,
+            )
+            for model in monthly.models
+        ]
+        return [Section(title="", metrics=metrics)]
 
     def _balance_section(self, data: api.SettingsData) -> Section:
         title = tr("추가 사용량", "Extra usage")

@@ -175,6 +175,7 @@ class OpenCodeProvider(Provider):
                 continue
             limit = limits.get(key, 0.0)
             used = percent / 100.0 * limit
+            left = max(0.0, limit - used)
             detail = None
             remaining = self._remaining_seconds(window, data.monotonic)
             if remaining is not None:
@@ -186,7 +187,7 @@ class OpenCodeProvider(Provider):
             metrics.append(
                 Metric(
                     label=label,
-                    value=f"{fmt.money(used)} / {fmt.money_compact(limit)}",
+                    value=f"{fmt.money(left)} / {fmt.money_compact(limit)}",
                     percent=percent,
                     detail=detail,
                 )
@@ -240,10 +241,10 @@ class OpenCodeProvider(Provider):
             value = fmt.money(usage)
             if limit:
                 percent = min(100.0, usage / limit * 100.0)
-                value = f"{value} / {fmt.money_compact(limit)}"
+                value = f"{fmt.money(max(0.0, limit - usage))} / {fmt.money_compact(limit)}"
             metrics.append(
                 Metric(
-                    label=tr("이번 달 사용", "This month"),
+                    label=tr("이번 달", "This month"),
                     value=value,
                     percent=percent,
                     detail=usage_detail,
@@ -271,13 +272,15 @@ class OpenCodeProvider(Provider):
         return Section(title=title, metrics=metrics, url=url)
 
     def _gauge_percent(self, console: api.ConsoleData) -> Optional[float]:
-        percents = [
-            api.usage_percent(getattr(console.go, key, None))
-            for _ko, _en, key in PERIODS
-            if console.go
-        ]
-        values = [value for value in percents if value is not None]
-        return max(values) if values else None
+        if console.go is None:
+            return None
+        # The shortest window moves fastest, so the needle follows it; PERIODS
+        # is ordered by length.
+        for _ko, _en, key in PERIODS:
+            percent = api.usage_percent(getattr(console.go, key, None))
+            if percent is not None:
+                return percent
+        return None
 
     # ------------------------------------------------------------------ menu
 

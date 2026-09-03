@@ -10,6 +10,7 @@ install_keyring_stub()
 
 from llm_meter import keystore
 from llm_meter.providers.codex import auth as codex_auth
+from llm_meter.providers.openrouter import auth as openrouter_auth
 from llm_meter.providers.opencode import auth as opencode_auth
 
 
@@ -195,6 +196,65 @@ class SessionKeyStorageTests(StoreBackedTestCase):
         with patch.object(keystore, "set", side_effect=keystore.KeystoreError("locked")):
             with self.assertRaises(opencode_auth.AuthError):
                 opencode_auth.save_session_key("k" * 40)
+
+
+class OpenRouterKeyCleanupTests(unittest.TestCase):
+    KEY = "sk-or-v1-" + "k" * 25
+
+    def test_a_plain_key_passes_through(self):
+        self.assertEqual(openrouter_auth.clean_key(self.KEY), self.KEY)
+
+    def test_a_management_key_passes_locally(self):
+        # The API answers 403 when a key may not read credits; the provider
+        # reports that as a hint, so the local check lets the key through.
+        key = "sk-or-mgmt-" + "k" * 20
+        self.assertEqual(openrouter_auth.clean_key(key), key)
+
+    def test_a_bearer_header_is_unwrapped(self):
+        self.assertEqual(openrouter_auth.clean_key("Bearer " + self.KEY), self.KEY)
+        self.assertEqual(openrouter_auth.clean_key("Authorization: Bearer " + self.KEY), self.KEY)
+
+    def test_surrounding_whitespace_and_quotes_are_dropped(self):
+        self.assertEqual(openrouter_auth.clean_key("  '" + self.KEY + "'  "), self.KEY)
+
+    def test_values_that_cannot_be_keys_are_rejected(self):
+        for value in (
+            None,
+            "",
+            "short",
+            "hello world",
+            "sk-proj-" + "k" * 30,
+        ):
+            with self.subTest(value=value):
+                self.assertIsNone(openrouter_auth.clean_key(value))
+
+    def test_the_instructions_point_at_the_keys_page(self):
+        text = openrouter_auth.instructions()
+
+        self.assertIn("settings/keys", text)
+        self.assertIn("sk-or-", text)
+
+
+class OpenRouterKeyStorageTests(StoreBackedTestCase):
+    def test_round_trip(self):
+        openrouter_auth.save_key("sk-or-v1-" + "k" * 25)
+
+        self.assertEqual(openrouter_auth.load_key(), "sk-or-v1-" + "k" * 25)
+
+    def test_nothing_stored_reads_as_signed_out(self):
+        self.assertIsNone(openrouter_auth.load_key())
+
+    def test_signing_out_clears_the_store(self):
+        openrouter_auth.save_key("sk-or-v1-" + "k" * 25)
+
+        openrouter_auth.delete_key()
+
+        self.assertIsNone(openrouter_auth.load_key())
+
+    def test_a_store_failure_is_reported_as_an_auth_error(self):
+        with patch.object(keystore, "set", side_effect=keystore.KeystoreError("locked")):
+            with self.assertRaises(openrouter_auth.AuthError):
+                openrouter_auth.save_key("sk-or-v1-" + "k" * 25)
 
 
 if __name__ == "__main__":

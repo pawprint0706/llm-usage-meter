@@ -16,6 +16,11 @@ from llm_meter.providers.cursor import api as cursor_api
 from llm_meter.providers.cursor.provider import CursorProvider, Loaded as CursorLoaded
 from llm_meter.providers.ollama import api as ollama_api
 from llm_meter.providers.ollama.provider import OllamaProvider, Loaded as OllamaLoaded
+from llm_meter.providers.openrouter import api as openrouter_api
+from llm_meter.providers.openrouter.provider import (
+    Loaded as OpenRouterLoaded,
+    OpenRouterProvider,
+)
 from llm_meter.providers.opencode import api as opencode_api
 from llm_meter.providers.opencode.provider import OpenCodeProvider, Loaded
 
@@ -61,7 +66,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(
             [provider.id for provider in providers],
-            ["codex", "opencode", "cursor", "ollama"],
+            ["codex", "opencode", "cursor", "ollama", "openrouter"],
         )
         self.assertTrue(all(provider.enabled for provider in providers))
 
@@ -72,7 +77,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(
             [provider.id for provider in providers],
-            ["opencode", "codex", "cursor", "ollama"],
+            ["opencode", "codex", "cursor", "ollama", "openrouter"],
         )
 
     def test_a_disabled_service_reports_itself_as_such(self):
@@ -99,18 +104,20 @@ class CodexRenderTests(unittest.TestCase):
             ["Plan usage", "Credits", "Usage limit resets: 0"],
         )
 
-    def test_the_gauge_follows_the_longest_window(self):
+    def test_the_gauge_follows_the_shortest_window(self):
         snapshot = self.provider.render(codex_usage())
 
-        self.assertEqual(snapshot.gauge_percent, 85)
+        # The fastest-moving allowance gates the tray needle: the 5h window.
+        self.assertEqual(snapshot.gauge_percent, 12)
         self.assertEqual(snapshot.badge, "plus")
         self.assertEqual(snapshot.sections[0].url, codex_api.USAGE_PAGE)
 
-    def test_each_window_shows_its_percentage_and_countdown(self):
+    def test_each_window_shows_its_remaining_share_and_countdown(self):
         metrics = self.provider.render(codex_usage()).sections[0].metrics
 
         self.assertEqual([metric.label for metric in metrics], ["5h", "Weekly"])
-        self.assertEqual(metrics[1].value, "85%")
+        # The fuel gauge reads what is left: 85% used leaves 15%.
+        self.assertEqual(metrics[1].value, "15% / 100%")
         self.assertEqual(metrics[1].percent, 85)
         self.assertEqual(metrics[1].detail, "resets in 3d 4h")
 
@@ -226,9 +233,9 @@ class OpenCodeRenderTests(unittest.TestCase):
         metrics = self.render().sections[0].metrics
 
         self.assertEqual([metric.label for metric in metrics], ["5h", "Week", "Month"])
-        self.assertEqual(metrics[0].value, "$6.36 / $12")
-        self.assertEqual(metrics[1].value, "$6.00 / $30")
-        self.assertEqual(metrics[2].value, "$6.00 / $60")
+        self.assertEqual(metrics[0].value, "$5.64 / $12")
+        self.assertEqual(metrics[1].value, "$24.00 / $30")
+        self.assertEqual(metrics[2].value, "$54.00 / $60")
         self.assertEqual(metrics[0].detail, "resets in 1h")
 
     def test_configured_limits_replace_the_defaults(self):
@@ -236,8 +243,8 @@ class OpenCodeRenderTests(unittest.TestCase):
 
         metrics = self.render().sections[0].metrics
 
-        self.assertEqual(metrics[0].value, "$10.60 / $20")
-        self.assertEqual(metrics[1].value, "$6.00 / $30")
+        self.assertEqual(metrics[0].value, "$9.40 / $20")
+        self.assertEqual(metrics[1].value, "$24.00 / $30")
 
     def test_a_period_without_a_percentage_shows_its_status(self):
         data = console(
@@ -271,7 +278,7 @@ class OpenCodeRenderTests(unittest.TestCase):
 
         self.assertEqual(metrics[0].value, "$16.13")
         self.assertEqual(metrics[1].label, "This month")
-        self.assertEqual(metrics[1].value, "$3.87 / $20")
+        self.assertEqual(metrics[1].value, "$16.13 / $20")
         self.assertAlmostEqual(metrics[1].percent, 19.35)
         self.assertEqual(metrics[2].value, "Off")
 
@@ -302,7 +309,7 @@ class OpenCodeRenderTests(unittest.TestCase):
         metric = self.render(data).sections[1].metrics[1]
 
         self.assertEqual(metric.label, "This month")
-        self.assertEqual(metric.value, "$0.00 / $20")
+        self.assertEqual(metric.value, "$20.00 / $20")
         self.assertEqual(metric.percent, 0)
         self.assertEqual(metric.detail, f"as of {stale.month}/{stale.day} — not refreshed")
 
@@ -320,7 +327,7 @@ class OpenCodeRenderTests(unittest.TestCase):
 
         metric = self.render(data).sections[1].metrics[1]
 
-        self.assertEqual(metric.value, "$3.87 / $20")
+        self.assertEqual(metric.value, "$16.13 / $20")
         self.assertAlmostEqual(metric.percent, 19.35)
         self.assertIsNone(metric.detail)
 
@@ -342,7 +349,7 @@ class OpenCodeRenderTests(unittest.TestCase):
         self.assertIsNone(snapshot.gauge_percent)
         self.assertEqual(snapshot.sections[1].metrics[0].value, "$16.13")
 
-    def test_the_gauge_follows_the_busiest_period(self):
+    def test_the_gauge_follows_the_shortest_window(self):
         snapshot = self.render()
 
         self.assertEqual(snapshot.gauge_percent, 53)
@@ -505,9 +512,10 @@ class OllamaRenderTests(unittest.TestCase):
     def test_usage_and_balance_are_separate_sections(self):
         snapshot = self.render()
 
+        # The model list trails as an untitled section after the balance.
         self.assertEqual(
             [section.title for section in snapshot.sections],
-            ["Cloud usage", "Extra usage"],
+            ["Included usage", "Extra usage", ""],
         )
         self.assertEqual(snapshot.sections[0].url, ollama_api.SETTINGS_PAGE)
         self.assertEqual(snapshot.badge, "pro")
@@ -515,22 +523,22 @@ class OllamaRenderTests(unittest.TestCase):
     def test_the_monthly_window_shows_its_dollars_and_countdown(self):
         metrics = self.render().sections[0].metrics
 
-        self.assertEqual(metrics[0].label, "Monthly usage")
-        self.assertEqual(metrics[0].value, "$0.03 of $60")
+        self.assertEqual(metrics[0].label, "Monthly")
+        self.assertEqual(metrics[0].value, "$59.97 of $60")
         self.assertAlmostEqual(metrics[0].percent, 0.05)
         self.assertIn("resets in", metrics[0].detail)
 
-    def test_models_are_listed_after_the_window(self):
-        metrics = self.render().sections[0].metrics
+    def test_models_are_listed_after_the_balance(self):
+        metrics = self.render().sections[2].metrics
 
-        self.assertEqual(metrics[1].label, "glm-5.3-flash")
-        self.assertEqual(metrics[1].value, "14 req")
-        self.assertTrue(metrics[1].muted)
+        self.assertEqual(metrics[0].label, "glm-5.3-flash")
+        self.assertEqual(metrics[0].value, "14 req")
+        self.assertTrue(metrics[0].muted)
 
     def test_korean_labels_use_the_slash_form(self):
         with patch.dict("os.environ", {"LLM_METER_LANG": "ko"}):
             metrics = self.render().sections[0].metrics
-            self.assertEqual(metrics[0].value, "$0.03 / $60")
+            self.assertEqual(metrics[0].value, "$59.97 / $60")
 
     def test_a_zero_balance_is_muted(self):
         metric = self.render().sections[1].metrics[0]
@@ -735,6 +743,202 @@ class OllamaSessionTests(unittest.TestCase):
         self.assertEqual(self.ui.opened, [ollama_api.SETTINGS_PAGE])
 
 
+def openrouter_credits(**overrides) -> openrouter_api.CreditsData:
+    data = openrouter_api.CreditsData(total_credits=100.5, total_usage=25.75)
+    for key, value in overrides.items():
+        setattr(data, key, value)
+    return data
+
+
+class OpenRouterRenderTests(unittest.TestCase):
+    def setUp(self):
+        self.ui = FakeUi()
+        self.provider = OpenRouterProvider(Config(), self.ui)
+
+    def render(self, credits=None):
+        return self.provider.render(
+            OpenRouterLoaded(credits=credits or openrouter_credits())
+        )
+
+    def test_credits_are_a_single_section(self):
+        snapshot = self.render()
+
+        # The metric row names itself "Credits", so the section carries no title.
+        self.assertEqual([section.title for section in snapshot.sections], [""])
+        self.assertEqual(snapshot.sections[0].url, openrouter_api.CREDITS_PAGE)
+        self.assertIsNone(snapshot.badge)
+
+    def test_the_section_shows_what_remains(self):
+        metrics = self.render().sections[0].metrics
+
+        self.assertEqual([metric.label for metric in metrics], ["Credits"])
+        self.assertEqual(metrics[0].value, "$74.75 / $100.50")
+        self.assertFalse(metrics[0].muted)
+        self.assertAlmostEqual(metrics[0].percent, 25.621890547263682)
+
+    def test_the_gauge_follows_the_credit_usage(self):
+        snapshot = self.render()
+
+        self.assertAlmostEqual(snapshot.gauge_percent, 25.621890547263682)
+
+    def test_a_drained_balance_is_muted(self):
+        credits = openrouter_credits(total_credits=25.75, total_usage=25.75)
+
+        metrics = self.render(credits).sections[0].metrics
+
+        self.assertEqual(metrics[0].value, "$0 / $25.75")
+        self.assertTrue(metrics[0].muted)
+        self.assertEqual(metrics[0].percent, 100.0)
+
+    def test_usage_over_the_purchased_credits_clamps_the_meter(self):
+        credits = openrouter_credits(total_credits=10, total_usage=12)
+
+        metrics = self.render(credits).sections[0].metrics
+
+        self.assertEqual(metrics[0].value, "$0 / $10")
+        self.assertEqual(metrics[0].percent, 100.0)
+        self.assertEqual(self.render(credits).gauge_percent, 100.0)
+
+    def test_no_purchased_credit_has_no_meter(self):
+        credits = openrouter_credits(total_credits=0, total_usage=0)
+
+        snapshot = self.render(credits)
+
+        metrics = snapshot.sections[0].metrics
+        self.assertEqual(metrics[0].value, "$0.00 / $0")
+        self.assertTrue(metrics[0].muted)
+        self.assertIsNone(metrics[0].percent)
+        self.assertIsNone(snapshot.gauge_percent)
+
+    def test_korean_label_reads_what_remains(self):
+        with patch.dict("os.environ", {"LLM_METER_LANG": "ko"}):
+            metrics = self.render().sections[0].metrics
+
+            self.assertEqual([metric.label for metric in metrics], ["크레딧"])
+            self.assertEqual(metrics[0].value, "$74.75 / $100.50")
+
+
+class OpenRouterSessionTests(unittest.TestCase):
+    KEY = "sk-or-v1-" + "k" * 25
+
+    def setUp(self):
+        self.ui = FakeUi()
+        self.provider = OpenRouterProvider(Config(), self.ui)
+        self.saved: list[str] = []
+        # Nothing here may touch the real credential store, and the card must
+        # start signed out however the developer's keychain looks.
+        for patcher in (
+            patch("llm_meter.providers.openrouter.provider.auth.load_key", return_value=None),
+            patch(
+                "llm_meter.providers.openrouter.provider.auth.save_key",
+                side_effect=self.saved.append,
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def entry(self, label: str):
+        return next(item for item in self.provider.menu() if item.label == label)
+
+    def test_a_signed_out_card_offers_both_ways_to_add_a_key(self):
+        labels = [entry.label for entry in self.provider.menu()]
+
+        self.assertIn("Paste API key from clipboard", labels)
+        self.assertIn("Enter API key...", labels)
+        self.assertNotIn("Sign out", labels)
+
+    def test_a_signed_in_card_hides_the_key_entries(self):
+        self.ui.answer = self.KEY
+        self.provider.primary_action().run()
+
+        labels = [entry.label for entry in self.provider.menu()]
+
+        self.assertNotIn("Paste API key from clipboard", labels)
+        self.assertNotIn("Enter API key...", labels)
+        self.assertIn("Sign out", labels)
+
+    def test_pasting_a_bearer_header_stores_the_key_and_refreshes(self):
+        self.ui.clipboard = "Bearer " + self.KEY
+
+        self.entry("Paste API key from clipboard").run()
+
+        self.assertEqual(self.saved, [self.KEY])
+        self.assertEqual(self.ui.refresh_requests, ["openrouter"])
+        self.assertTrue(self.provider.is_authenticated())
+
+    def test_clipboard_junk_is_refused(self):
+        self.ui.clipboard = "hello world"
+
+        self.entry("Paste API key from clipboard").run()
+
+        self.assertEqual(self.saved, [])
+        self.assertEqual(
+            self.provider.message, "The clipboard does not look like an API key"
+        )
+
+    def test_the_prompt_explains_where_to_find_the_key(self):
+        self.ui.answer = self.KEY
+
+        self.provider.primary_action().run()
+
+        title, prompt, secret = self.ui.prompts[0]
+        self.assertEqual(title, "OpenRouter API key")
+        self.assertIn("settings/keys", prompt)
+        self.assertTrue(secret)
+        self.assertEqual(self.saved, [self.KEY])
+
+    def test_cancelling_the_prompt_changes_nothing(self):
+        self.ui.answer = None
+
+        self.provider.primary_action().run()
+
+        self.assertEqual(self.saved, [])
+        self.assertEqual(self.provider.message, "")
+
+    def test_a_rejected_key_signs_the_card_out(self):
+        self.ui.answer = self.KEY
+        self.provider.primary_action().run()
+
+        with patch(
+            "llm_meter.providers.openrouter.provider.auth.delete_key"
+        ) as delete, patch(
+            "llm_meter.providers.openrouter.provider.api.fetch_credits",
+            side_effect=openrouter_api.AuthExpiredError("gone"),
+        ):
+            self.provider.refresh()
+
+        delete.assert_called_once()
+        self.assertIs(self.provider.state, State.SIGNED_OUT)
+        self.assertTrue(self.ui.notified)
+
+    def test_a_key_without_credit_access_is_kept_and_reported(self):
+        self.ui.answer = self.KEY
+        self.provider.primary_action().run()
+
+        with patch(
+            "llm_meter.providers.openrouter.provider.auth.delete_key"
+        ) as delete, patch(
+            "llm_meter.providers.openrouter.provider.api.fetch_credits",
+            side_effect=openrouter_api.ScopeError("HTTP 403"),
+        ):
+            self.provider.refresh()
+
+        delete.assert_not_called()
+        self.assertIs(self.provider.state, State.ERROR)
+        self.assertIn("cannot read credits", self.provider.message)
+        self.assertTrue(self.provider.is_authenticated())
+
+    def test_the_pages_open(self):
+        self.entry("Open credits page").run()
+        self.entry("Open activity page").run()
+        self.entry("Open logs page").run()
+
+        self.assertEqual(
+            self.ui.opened,
+            [openrouter_api.CREDITS_PAGE, openrouter_api.ACTIVITY_PAGE, openrouter_api.LOGS_PAGE],
+        )
+
+
 def cursor_usage(**overrides) -> cursor_api.UsageData:
     data = cursor_api.parse_usage_summary(
         {
@@ -790,19 +994,20 @@ class CursorRenderTests(unittest.TestCase):
         metrics = self.render().sections[0].metrics
 
         self.assertEqual(metrics[0].label, "Total")
-        self.assertEqual(metrics[0].value, "20%")
+        # The fuel gauge reads what is left: 20.2% used leaves ~80%.
+        self.assertEqual(metrics[0].value, "80% / 100%")
         self.assertAlmostEqual(metrics[0].percent, 20.2)
         self.assertIn("resets in", metrics[0].detail)
         self.assertEqual(metrics[1].label, "Auto")
         self.assertEqual(metrics[2].label, "API")
-        self.assertEqual(metrics[2].value, "100%")
+        self.assertEqual(metrics[2].value, "0% / 100%")
         self.assertIsNone(self.render().sections[0].note)
 
     def test_spending_shows_included_bonus_and_on_demand(self):
         metrics = self.render().sections[1].metrics
 
         self.assertEqual(metrics[0].label, "Included")
-        self.assertEqual(metrics[0].value, "$20.00 / $20")
+        self.assertEqual(metrics[0].value, "$0.00 / $20")
         self.assertAlmostEqual(metrics[0].percent, 100.0)
         self.assertEqual(metrics[1].label, "Bonus")
         self.assertEqual(metrics[1].value, "$49.81")
@@ -826,7 +1031,7 @@ class CursorRenderTests(unittest.TestCase):
         metric = self.render(usage).sections[1].metrics[2]
 
         self.assertEqual(metric.label, "On-demand")
-        self.assertEqual(metric.value, "$12.34 / $50")
+        self.assertEqual(metric.value, "$37.66 / $50")
         self.assertAlmostEqual(metric.percent, 24.68)
 
     def test_menu_opens_usage_and_spending_pages(self):

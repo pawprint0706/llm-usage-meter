@@ -1,6 +1,6 @@
 [project]
 name = "llm-usage-meter"
-version = "1.0.13"
+version = "1.0.14"
 description = "Tray meter for Codex and OpenCode usage, credits and limits"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,6 +31,7 @@ include = ["llm_meter*"]
     "assets/codex-blossom.ico",
     "assets/cursor-cube.svg",
     "assets/ollama-icon.svg",
+    "assets/openrouter-icon.svg",
     "assets/app-icon.png",
     "assets/app-icon.ico",
     "assets/app-icon.icns",

@@ -115,11 +115,13 @@ class CodexProvider(Provider):
             self._credits_section(data.credits),
             self._reset_section(data),
         ]
+        # The tray needle follows the shortest window: it is the allowance that
+        # moves fastest. Windows are sorted by length, so the first one wins.
         return Snapshot(
             sections=sections,
             badge=data.plan_type,
             gauge_percent=(
-                data.primary_window.used_percent if data.primary_window else None
+                data.windows[0].used_percent if data.windows else None
             ),
         )
 
@@ -127,10 +129,11 @@ class CodexProvider(Provider):
         metrics = []
         for window in data.windows:
             remaining = (window.reset_at - datetime.now(window.reset_at.tzinfo)).total_seconds()
+            # The fuel gauge reads what is left: the text matches the bar.
             metrics.append(
                 Metric(
                     label=_window_label(window.window_seconds),
-                    value=fmt.percent(window.used_percent),
+                    value=f"{fmt.percent(window.remaining_percent)} / {fmt.percent(100.0)}",
                     percent=window.used_percent,
                     detail=tr(
                         f"{fmt.duration(remaining)} 후 초기화",

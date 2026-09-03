@@ -314,13 +314,29 @@ class MeterApp(QObject):
             return None
         return rect
 
-    def _gauge_percent(self) -> Optional[float]:
-        values = [
-            provider.snapshot.gauge_percent
+    def _gauge_provider(self) -> Optional[Provider]:
+        """The provider whose reading the tray needle shows.
+
+        The selected tab's, else the first enabled tab's with data. Each
+        provider reports the shortest window it meters, so the needle tracks
+        the fastest-moving allowance of the service being viewed.
+        """
+        candidates = [
+            provider
             for provider in self.providers
             if provider.enabled and provider.snapshot and provider.snapshot.gauge_percent is not None
         ]
-        return max(values) if values else None
+        if not candidates:
+            return None
+        selected = self.popup.selected_provider_id
+        for provider in candidates:
+            if provider.id == selected:
+                return provider
+        return candidates[0]
+
+    def _gauge_percent(self) -> Optional[float]:
+        provider = self._gauge_provider()
+        return provider.snapshot.gauge_percent if provider else None
 
     def _update_tray_icon(self, force: bool = False) -> None:
         light_ink = theme.tray_needs_light_ink()
@@ -336,6 +352,13 @@ class MeterApp(QObject):
             icon.addPixmap(glyphs.gauge_pixmap(size, percent, color))
         icon.setIsMask(template)
         self.tray.setIcon(icon)
+        provider = self._gauge_provider()
+        tooltip = tr("LLM 사용량", "LLM usage")
+        if provider is not None:
+            tooltip = tr(
+                f"LLM 사용량 ({provider.name})", f"LLM usage ({provider.name})"
+            )
+        self.tray.setToolTip(tooltip)
 
     # ------------------------------------------------------------------- actions
 

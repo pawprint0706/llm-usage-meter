@@ -129,11 +129,16 @@ class CursorProvider(Provider):
                 )
             )
         else:
+            # The fuel gauge reads what is left: the text matches the bar.
             total = plan.total_percent
             metrics.append(
                 Metric(
                     label=tr("전체", "Total"),
-                    value=fmt.percent(total) if total is not None else tr("없음", "n/a"),
+                    value=(
+                        f"{fmt.percent(100.0 - total)} / {fmt.percent(100.0)}"
+                        if total is not None
+                        else tr("없음", "n/a")
+                    ),
                     percent=total,
                     detail=cycle_detail,
                     muted=total is None,
@@ -143,7 +148,7 @@ class CursorProvider(Provider):
                 metrics.append(
                     Metric(
                         label=tr("자동", "Auto"),
-                        value=fmt.percent(plan.auto_percent),
+                        value=f"{fmt.percent(100.0 - plan.auto_percent)} / {fmt.percent(100.0)}",
                         percent=plan.auto_percent,
                     )
                 )
@@ -151,7 +156,7 @@ class CursorProvider(Provider):
                 metrics.append(
                     Metric(
                         label=tr("API", "API"),
-                        value=fmt.percent(plan.api_percent),
+                        value=f"{fmt.percent(100.0 - plan.api_percent)} / {fmt.percent(100.0)}",
                         percent=plan.api_percent,
                     )
                 )
@@ -163,13 +168,14 @@ class CursorProvider(Provider):
         )
 
     def _money_pair(self, used_cents: Optional[float], limit_cents: Optional[float]) -> str:
+        """What is left of a capped allowance: '$left / $limit'."""
         used = api.cents_to_dollars(used_cents)
         limit = api.cents_to_dollars(limit_cents)
         if used is None and limit is None:
             return tr("없음", "n/a")
         if limit is None:
             return fmt.money(used or 0.0)
-        return f"{fmt.money(used or 0.0)} / {fmt.money_compact(limit)}"
+        return f"{fmt.money(max(0.0, limit - (used or 0.0)))} / {fmt.money_compact(limit)}"
 
     def _spend_section(self, usage: api.UsageData) -> Section:
         plan = usage.plan

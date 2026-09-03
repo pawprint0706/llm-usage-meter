@@ -25,6 +25,7 @@ from .theme import Palette
 
 MARK_SIZE = 18
 BAR_HEIGHT = 6
+BAR_PAD = 3  # vertical padding so a bar alone sits as far from its label as a bar sharing a row with a note
 
 
 @dataclass
@@ -65,30 +66,38 @@ def _label(
 
 
 class UsageBar(QWidget):
-    """Rounded progress track coloured by how close the usage is to the limit."""
+    """Fuel-gauge style bar: the fill is what remains of the allowance.
+
+    Metrics report usage as a percent, but the card draws what is left, so
+    every service reads the same way — full at the start, draining as the
+    allowance is spent. The ink still follows the usage level: what remains
+    turns amber, then red, as the allowance runs out.
+    """
 
     def __init__(self, palette: Palette, percent: float, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self._palette = palette
-        self._percent = max(0.0, min(100.0, percent))
-        self.setFixedHeight(BAR_HEIGHT)
+        self._used = max(0.0, min(100.0, percent))
+        self.setFixedHeight(BAR_HEIGHT + 2 * BAR_PAD)
+        self.setContentsMargins(0, BAR_PAD, 0, BAR_PAD)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
     def paintEvent(self, event) -> None:  # noqa: N802 — Qt naming
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setPen(Qt.NoPen)
-        radius = self.height() / 2
-        full = QRectF(0, 0, self.width(), self.height())
+        full = self.contentsRect()
+        radius = full.height() / 2
         track = QPainterPath()
         track.addRoundedRect(full, radius, radius)
         painter.fillPath(track, QColor(self._palette.track))
-        if self._percent <= 0:
+        remaining = 100.0 - self._used
+        if remaining <= 0:
             return
-        width = max(self.height(), full.width() * self._percent / 100.0)
+        width = max(full.height(), full.width() * remaining / 100.0)
         fill = QPainterPath()
-        fill.addRoundedRect(QRectF(0, 0, width, self.height()), radius, radius)
-        painter.fillPath(fill, QColor(self._palette.usage_color(self._percent)))
+        fill.addRoundedRect(QRectF(full.left(), full.top(), width, full.height()), radius, radius)
+        painter.fillPath(fill, QColor(self._palette.usage_color(self._used)))
 
 
 class LinkLabel(QLabel):
@@ -170,11 +179,12 @@ class SectionView(QWidget):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(4)
-        header.addWidget(
-            _label(self, section.title, palette.subtle, -2, QFont.Weight.DemiBold)
-        )
-        header.addStretch(1)
-        layout.addLayout(header)
+        if section.title:
+            header.addWidget(
+                _label(self, section.title, palette.subtle, -2, QFont.Weight.DemiBold)
+            )
+            header.addStretch(1)
+            layout.addLayout(header)
 
         for metric in section.metrics:
             layout.addWidget(MetricView(metric, palette, self))

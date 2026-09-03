@@ -6,8 +6,8 @@ cd "$(dirname "$0")"
 
 echo "This will stop LLM Usage Meter and remove:"
 echo "  - the start-at-login entry (LaunchAgent / autostart)"
-echo "  - the Codex login, the OpenCode session key, the Cursor session token"
-echo "    and the Ollama session cookies from the keychain"
+echo "  - the Codex login, the OpenCode session key, the Cursor session token,"
+echo "    the Ollama session cookies and the OpenRouter API key from the keychain"
 echo "  - app data in ~/.llm-usage-meter"
 echo "  - the .venv folder in this project"
 read -p "Continue? [y/N] " CONFIRM

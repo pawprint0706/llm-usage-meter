@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QRect
-from PySide6.QtGui import QColor, QGuiApplication
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QTabBar, QTabWidget
 
 from tests._support import FakeUi, install_keyring_stub
@@ -24,7 +24,7 @@ from llm_meter.providers.base import State
 from llm_meter.providers.opencode.provider import Loaded
 from llm_meter.ui import glyphs, theme
 from llm_meter.ui.popup import PopupWindow, _ActionButton
-from llm_meter.ui.widgets import ProviderCard
+from llm_meter.ui.widgets import ProviderCard, UsageBar
 
 _qt_app = None
 
@@ -101,13 +101,15 @@ class ContentTests(PopupTestCase):
 
         tabs = self.tabs()
         self.assertIsNotNone(tabs)
-        self.assertEqual(tabs.count(), 4)
-        self.assertEqual(self.popup._tab_ids, ["codex", "opencode", "cursor", "ollama"])
+        self.assertEqual(tabs.count(), 5)
+        self.assertEqual(
+            self.popup._tab_ids, ["codex", "opencode", "cursor", "ollama", "openrouter"]
+        )
         self.assertEqual(
             [tabs.tabToolTip(i) for i in range(tabs.count())],
-            ["Codex", "OpenCode", "Cursor", "Ollama"],
+            ["Codex", "OpenCode", "Cursor", "Ollama", "OpenRouter"],
         )
-        self.assertEqual(len(self.cards()), 4)
+        self.assertEqual(len(self.cards()), 5)
 
     def test_tab_order_follows_the_saved_provider_order(self):
         self.cfg.provider_order = ["opencode", "codex"]
@@ -117,10 +119,12 @@ class ContentTests(PopupTestCase):
 
         self.popup.rebuild()
 
-        self.assertEqual(self.popup._tab_ids, ["opencode", "codex", "cursor", "ollama"])
+        self.assertEqual(
+            self.popup._tab_ids, ["opencode", "codex", "cursor", "ollama", "openrouter"]
+        )
         self.assertEqual(
             [self.tabs().tabToolTip(i) for i in range(self.tabs().count())],
-            ["OpenCode", "Codex", "Cursor", "Ollama"],
+            ["OpenCode", "Codex", "Cursor", "Ollama", "OpenRouter"],
         )
 
     def test_a_disabled_service_is_left_out(self):
@@ -130,13 +134,13 @@ class ContentTests(PopupTestCase):
         self.popup.rebuild()
 
         tabs = self.tabs()
-        self.assertEqual(tabs.count(), 3)
-        self.assertEqual(self.popup._tab_ids, ["opencode", "cursor", "ollama"])
+        self.assertEqual(tabs.count(), 4)
+        self.assertEqual(self.popup._tab_ids, ["opencode", "cursor", "ollama", "openrouter"])
         self.assertEqual(
             [tabs.tabToolTip(i) for i in range(tabs.count())],
-            ["OpenCode", "Cursor", "Ollama"],
+            ["OpenCode", "Cursor", "Ollama", "OpenRouter"],
         )
-        self.assertEqual(len(self.cards()), 3)
+        self.assertEqual(len(self.cards()), 4)
 
     def test_every_section_is_rendered(self):
         self.make_ready()
@@ -253,7 +257,8 @@ class ContentTests(PopupTestCase):
         self.assertIs(self.tabs(), tabs_before)
         card_after = self.cards()[tabs_before.currentIndex()]
         self.assertIsNot(card_after, card_before)
-        self.assertIn("91%", self.labels())
+        # The fuel gauge reads what is left: 91% used leaves 9%.
+        self.assertIn("9% / 100%", self.labels())
 
     def test_a_theme_switch_recolors_the_header_and_tab_labels(self):
         """Regression: the in-place rebuild kept the previous theme's colours
@@ -348,7 +353,7 @@ class SizeTests(PopupTestCase):
 
         self.popup.rebuild()
 
-        self.assertEqual(len(self.cards()), 4)
+        self.assertEqual(len(self.cards()), 5)
         self.assertEqual(self.popup.height(), tall)
 
     def test_returning_to_a_shorter_tab_does_not_leave_a_taller_panel(self):
@@ -452,12 +457,56 @@ class GlyphTests(unittest.TestCase):
         codex = glyphs.provider_pixmap("codex", 18, QColor("#000000")).toImage()
         opencode = glyphs.provider_pixmap("opencode", 18, QColor("#000000")).toImage()
         cursor = glyphs.provider_pixmap("cursor", 18, QColor("#000000")).toImage()
+        openrouter = glyphs.provider_pixmap("openrouter", 18, QColor("#000000")).toImage()
 
         self.assertFalse(codex.isNull())
         self.assertFalse(cursor.isNull())
+        self.assertFalse(openrouter.isNull())
         self.assertNotEqual(codex, opencode)
         self.assertNotEqual(cursor, codex)
         self.assertNotEqual(cursor, opencode)
+        self.assertNotEqual(openrouter, codex)
+        self.assertNotEqual(openrouter, cursor)
+
+
+class UsageBarTests(unittest.TestCase):
+    """The bar is a fuel gauge: the fill is what remains, not what was used."""
+
+    def draw(self, used_percent: float) -> QImage:
+        bar = UsageBar(theme.DARK, used_percent)
+        bar.resize(80, bar.height())
+        image = QImage(80, bar.height(), QImage.Format.Format_ARGB32)
+        image.fill(Qt.transparent)
+        bar.render(image)
+        return image
+
+    def color(self, image: QImage, x: int) -> str:
+        return image.pixelColor(x, image.height() // 2).name().upper()
+
+    def test_an_untouched_allowance_fills_the_whole_bar(self):
+        image = self.draw(0)
+
+        self.assertEqual(self.color(image, 2), theme.DARK.ok)
+        self.assertEqual(self.color(image, 76), theme.DARK.ok)
+
+    def test_the_spent_part_leaves_the_track(self):
+        # 20% used: the remaining 80% is the fill, so the right end sits on the track.
+        image = self.draw(20)
+
+        self.assertEqual(self.color(image, 40), theme.DARK.ok)
+        self.assertEqual(self.color(image, 76), theme.DARK.track)
+
+    def test_a_spent_allowance_shows_only_the_track(self):
+        image = self.draw(100)
+
+        self.assertEqual(self.color(image, 2), theme.DARK.track)
+        self.assertEqual(self.color(image, 76), theme.DARK.track)
+
+    def test_the_remaining_ink_warns_as_the_allowance_runs_out(self):
+        image = self.draw(92)
+
+        self.assertEqual(self.color(image, 2), theme.DARK.danger)
+        self.assertEqual(self.color(image, 76), theme.DARK.track)
 
 
 if __name__ == "__main__":

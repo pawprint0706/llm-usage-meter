@@ -11,7 +11,6 @@ from PySide6.QtGui import (
     QColor,
     QCursor,
     QFont,
-    QFontMetrics,
     QGuiApplication,
     QIcon,
     QMouseEvent,
@@ -38,7 +37,7 @@ from .. import format as fmt, platform_mac
 from ..i18n import tr
 from ..providers import State
 from . import glyphs, theme
-from .widgets import CardHooks, ProviderCard, _font, _label
+from .widgets import CardHooks, ProviderCard, _label
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,6 @@ TAB_ICON_SIZE = 14
 # Baked into the tab label pixmap so Qt style padding cannot inflate it.
 TAB_PAD_Y = 12
 TAB_TO_CARD_GAP = 0
-TAB_ICON_TEXT_GAP = 6
 # No pad past the composed label; selection is ink weight only.
 TAB_LABEL_RIGHT_PAD = 0
 # Must match QTabBar::tab margin-right; Qt takes margin out of the painted
@@ -192,6 +190,11 @@ class PopupWindow(QWidget):
             menu_guard=self.menu_guard,
         )
         self._build()
+
+    @property
+    def selected_provider_id(self) -> Optional[str]:
+        """The tab the popup last showed, so the tray needle can follow it."""
+        return self._selected_provider_id
 
     # ----------------------------------------------------------------- layout
 
@@ -523,37 +526,24 @@ class PopupWindow(QWidget):
         tabs.setCurrentIndex(self._tab_ids.index(selected))
 
     def _tab_label(self, provider, palette: theme.Palette, *, selected: bool) -> QWidget:
-        """Pre-composited icon + name so the two stay vertically aligned on macOS.
+        """Pre-composited icon-only mark so it stays vertically aligned on macOS.
 
         Vertical ``TAB_PAD_Y`` is drawn into the pixmap so the gap above/below the
-        logo is exact and not compounded by QTabBar style padding.
+        logo is exact and not compounded by QTabBar style padding. The service
+        name lives in the tab tooltip.
         """
         color = QColor(palette.text if selected else palette.faint)
-        font = _font(self._panel, -1, QFont.Weight.DemiBold if selected else QFont.Weight.Normal)
-        metrics = QFontMetrics(font)
-        text_width = metrics.horizontalAdvance(provider.name)
-        content_h = max(TAB_ICON_SIZE, metrics.height())
-        height = content_h + 2 * TAB_PAD_Y
-        width = TAB_ICON_SIZE + TAB_ICON_TEXT_GAP + text_width
-
-        canvas = QPixmap(width, height)
+        canvas = QPixmap(TAB_ICON_SIZE, TAB_ICON_SIZE + 2 * TAB_PAD_Y)
         canvas.fill(Qt.GlobalColor.transparent)
         painter = QPainter(canvas)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        icon = glyphs.provider_pixmap(provider.id, TAB_ICON_SIZE, color)
-        # Marks read slightly high next to Latin capitals; shift the glyph down 1px.
-        painter.drawPixmap(0, TAB_PAD_Y + (content_h - TAB_ICON_SIZE) // 2 + 1, icon)
-        painter.setPen(color)
-        painter.setFont(font)
-        text_y = TAB_PAD_Y + (content_h + metrics.ascent() - metrics.descent()) // 2
-        painter.drawText(TAB_ICON_SIZE + TAB_ICON_TEXT_GAP, text_y, provider.name)
+        painter.drawPixmap(0, TAB_PAD_Y, glyphs.provider_pixmap(provider.id, TAB_ICON_SIZE, color))
         painter.end()
 
         label = QLabel()
         label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         label.setPixmap(canvas)
-        label.setFixedSize(width, height)
+        label.setFixedSize(TAB_ICON_SIZE, TAB_ICON_SIZE + 2 * TAB_PAD_Y)
         label.setStyleSheet("background: transparent; border: none;")
         return label
 

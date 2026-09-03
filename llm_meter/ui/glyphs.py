@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 _CODEX_ICON = "codex-blossom.ico"
 _CURSOR_ICON = "cursor-cube.svg"
 _OLLAMA_ICON = "ollama-icon.svg"
+_OPENROUTER_ICON = "openrouter-icon.svg"
 
 # OpenCode logomark geometry in the official 512x512 viewBox: a frame with an
 # interior hole whose lower two thirds hold a dimmer inset panel.
@@ -253,6 +254,56 @@ def _ollama_pixmap(size: int, color: QColor) -> QPixmap:
     return _centered(_tint(scaled, color), size)
 
 
+@functools.lru_cache(maxsize=1)
+def _openrouter_mask() -> QImage | None:
+    """Alpha mask of the official OpenRouter grape glyph (SVG)."""
+    path = paths.asset(_OPENROUTER_ICON)
+    if not path:
+        logger.warning("Bundled asset %s is missing", _OPENROUTER_ICON)
+        return None
+    renderer = QSvgRenderer(path)
+    if not renderer.isValid():
+        logger.warning("Could not parse %s", path)
+        return None
+    view = renderer.viewBoxF()
+    if view.isEmpty():
+        view = QRectF(0, 0, 1024, 730)
+    # Render large enough that downscales stay sharp in the popup and tray.
+    height = 512
+    width = max(1, round(height * view.width() / view.height()))
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
+    image.fill(Qt.transparent)
+    painter = QPainter(image)
+    renderer.render(painter, QRectF(0, 0, width, height))
+    painter.end()
+
+    mask = QImage(width, height, QImage.Format.Format_ARGB32)
+    mask.fill(Qt.transparent)
+    left, top, right, bottom = width, height, -1, -1
+    for y in range(height):
+        for x in range(width):
+            pixel = image.pixelColor(x, y)
+            if pixel.alpha() <= 8:
+                continue
+            # The mark is a single violet silhouette; keep alpha so tinting stays crisp.
+            mask.setPixelColor(x, y, QColor(0, 0, 0, pixel.alpha()))
+            left, top = min(left, x), min(top, y)
+            right, bottom = max(right, x), max(bottom, y)
+    if right < 0:
+        return None
+    return mask.copy(left, top, right - left + 1, bottom - top + 1)
+
+
+def _openrouter_pixmap(size: int, color: QColor) -> QPixmap:
+    mask = _openrouter_mask()
+    if mask is None:
+        return _fallback_pixmap(size, color)
+    scaled = mask.scaled(
+        size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+    )
+    return _centered(_tint(scaled, color), size)
+
+
 def _fallback_pixmap(size: int, color: QColor) -> QPixmap:
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
@@ -270,6 +321,7 @@ _BUILDERS = {
     "opencode": _opencode_pixmap,
     "cursor": _cursor_pixmap,
     "ollama": _ollama_pixmap,
+    "openrouter": _openrouter_pixmap,
 }
 
 
@@ -284,11 +336,11 @@ def provider_pixmap(provider_id: str, size: int, color: QColor) -> QPixmap:
 
 
 def gauge_pixmap(size: int, percent: float | None, color: QColor) -> QPixmap:
-    """A 270-degree dial whose needle points at `percent`.
+    """A 270-degree fuel-gauge dial: the needle points at what remains.
 
-    Single solid ink only: the tray hands this to macOS as a template image, so
-    both the dial and needle stay fully opaque for menu-bar contrast. With no
-    reading yet the needle rests at zero.
+    ``percent`` is the used share, so a full tank rests at the sweep's start
+    and drains clockwise as the allowance is spent — matching the cards. With
+    no reading yet the needle rests at full.
     """
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.transparent)
@@ -304,7 +356,8 @@ def gauge_pixmap(size: int, percent: float | None, color: QColor) -> QPixmap:
     painter.setPen(QPen(color, stroke, Qt.SolidLine, Qt.PenCapStyle.RoundCap))
     painter.drawArc(box, round(start_angle * 16), round(sweep * 16))
 
-    ratio = max(0.0, min(100.0, percent)) / 100.0 if percent is not None else 0.0
+    used = max(0.0, min(100.0, percent)) if percent is not None else 0.0
+    ratio = 1.0 - used / 100.0
     center = box.center()
     angle = math.radians(start_angle + sweep * ratio)
     radius = box.width() / 2 * 0.78

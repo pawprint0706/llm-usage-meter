@@ -5,8 +5,9 @@ cd /d "%~dp0"
 
 echo This will stop LLM Usage Meter and remove:
 echo   - the "Start at login" registry entry
-echo   - the Codex login, the OpenCode session key, the Cursor session token
-echo     and the Ollama session cookies from Credential Manager
+echo   - the Codex login, the OpenCode session key, the Cursor session token,
+echo     the Ollama session cookies and the OpenRouter API key
+echo     from Credential Manager
 echo   - app data in "%USERPROFILE%\.llm-usage-meter"
 echo   - the .venv folder in this project
 set /p CONFIRM="Continue? [y/N] "

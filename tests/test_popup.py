@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import unittest
+from types import SimpleNamespace
 from typing import Optional
 from unittest.mock import Mock, patch
 
@@ -19,6 +20,7 @@ from tests.test_providers import codex_usage, console
 install_keyring_stub()
 
 from llm_meter.config import Config
+from llm_meter.app import MeterApp
 from llm_meter.providers import build_providers
 from llm_meter.providers.base import State
 from llm_meter.providers.opencode.provider import Loaded
@@ -91,6 +93,55 @@ class PopupTestCase(unittest.TestCase):
 
     def tabs(self) -> Optional[QTabWidget]:
         return self.popup.findChild(QTabWidget)
+
+
+class TrayMarkTests(unittest.TestCase):
+    """The OpenRouter balance is a mark, while provider allowances stay gauges."""
+
+    def _app(self, selected: str):
+        app = MeterApp.__new__(MeterApp)
+        app.popup = SimpleNamespace(selected_provider_id=selected)
+        app._tray_ink_light = None
+        app._tray_percent = None
+        app._tray_provider_id = None
+        app.tray = Mock()
+        openrouter = SimpleNamespace(
+            id="openrouter", name="OpenRouter", enabled=True, snapshot=None
+        )
+        codex = SimpleNamespace(
+            id="codex",
+            name="Codex",
+            enabled=True,
+            snapshot=SimpleNamespace(gauge_percent=42.0),
+        )
+        app.providers = [codex, openrouter]
+        app._providers_by_id = {provider.id: provider for provider in app.providers}
+        return app
+
+    def test_openrouter_selection_uses_its_official_mark(self):
+        app = self._app("openrouter")
+        with patch("llm_meter.app.theme.tray_needs_light_ink", return_value=False), patch(
+            "llm_meter.app.glyphs.provider_pixmap", wraps=glyphs.provider_pixmap
+        ) as provider_mark, patch(
+            "llm_meter.app.glyphs.gauge_pixmap", wraps=glyphs.gauge_pixmap
+        ) as gauge:
+            app._update_tray_icon()
+
+        self.assertEqual(provider_mark.call_count, 8)
+        self.assertTrue(all(call.args[0] == "openrouter" for call in provider_mark.call_args_list))
+        gauge.assert_not_called()
+
+    def test_other_provider_selection_keeps_the_gauge(self):
+        app = self._app("codex")
+        with patch("llm_meter.app.theme.tray_needs_light_ink", return_value=False), patch(
+            "llm_meter.app.glyphs.provider_pixmap", wraps=glyphs.provider_pixmap
+        ) as provider_mark, patch(
+            "llm_meter.app.glyphs.gauge_pixmap", wraps=glyphs.gauge_pixmap
+        ) as gauge:
+            app._update_tray_icon()
+
+        provider_mark.assert_not_called()
+        self.assertEqual(gauge.call_count, 8)
 
 
 class ContentTests(PopupTestCase):

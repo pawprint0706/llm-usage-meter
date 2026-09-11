@@ -768,54 +768,57 @@ class OpenRouterRenderTests(unittest.TestCase):
         self.assertEqual(snapshot.sections[0].url, openrouter_api.CREDITS_PAGE)
         self.assertIsNone(snapshot.badge)
 
-    def test_the_section_shows_what_remains(self):
+    def test_the_section_shows_current_and_total_purchased_balances(self):
         metrics = self.render().sections[0].metrics
 
-        self.assertEqual([metric.label for metric in metrics], ["Credits"])
-        self.assertEqual(metrics[0].value, "$74.75 / $100.50")
+        self.assertEqual([metric.label for metric in metrics], ["Credits", "Total purchased"])
+        self.assertEqual(metrics[0].value, "$74.75")
         self.assertFalse(metrics[0].muted)
-        self.assertAlmostEqual(metrics[0].percent, 25.621890547263682)
+        self.assertTrue(metrics[0].featured)
+        self.assertIsNone(metrics[0].percent)
+        self.assertEqual(metrics[1].value, "$100.50")
+        self.assertFalse(metrics[1].featured)
 
-    def test_the_gauge_follows_the_credit_usage(self):
+    def test_openrouter_has_no_tray_gauge_value(self):
         snapshot = self.render()
 
-        self.assertAlmostEqual(snapshot.gauge_percent, 25.621890547263682)
+        self.assertIsNone(snapshot.gauge_percent)
 
     def test_a_drained_balance_is_muted(self):
         credits = openrouter_credits(total_credits=25.75, total_usage=25.75)
 
         metrics = self.render(credits).sections[0].metrics
 
-        self.assertEqual(metrics[0].value, "$0 / $25.75")
+        self.assertEqual(metrics[0].value, "$0.00")
         self.assertTrue(metrics[0].muted)
-        self.assertEqual(metrics[0].percent, 100.0)
+        self.assertIsNone(metrics[0].percent)
 
-    def test_usage_over_the_purchased_credits_clamps_the_meter(self):
+    def test_usage_over_the_purchased_credits_still_displays_zero(self):
         credits = openrouter_credits(total_credits=10, total_usage=12)
 
         metrics = self.render(credits).sections[0].metrics
 
-        self.assertEqual(metrics[0].value, "$0 / $10")
-        self.assertEqual(metrics[0].percent, 100.0)
-        self.assertEqual(self.render(credits).gauge_percent, 100.0)
+        self.assertEqual(metrics[0].value, "$0.00")
+        self.assertIsNone(metrics[0].percent)
+        self.assertIsNone(self.render(credits).gauge_percent)
 
-    def test_no_purchased_credit_has_no_meter(self):
+    def test_no_purchased_credit_displays_zero_balance(self):
         credits = openrouter_credits(total_credits=0, total_usage=0)
 
         snapshot = self.render(credits)
 
         metrics = snapshot.sections[0].metrics
-        self.assertEqual(metrics[0].value, "$0.00 / $0")
+        self.assertEqual(metrics[0].value, "$0.00")
         self.assertTrue(metrics[0].muted)
         self.assertIsNone(metrics[0].percent)
         self.assertIsNone(snapshot.gauge_percent)
 
-    def test_korean_label_reads_what_remains(self):
+    def test_korean_label_reads_as_credits(self):
         with patch.dict("os.environ", {"LLM_METER_LANG": "ko"}):
             metrics = self.render().sections[0].metrics
 
-            self.assertEqual([metric.label for metric in metrics], ["크레딧"])
-            self.assertEqual(metrics[0].value, "$74.75 / $100.50")
+            self.assertEqual([metric.label for metric in metrics], ["크레딧", "누적 충전"])
+            self.assertEqual(metrics[0].value, "$74.75")
 
 
 class OpenRouterSessionTests(unittest.TestCase):

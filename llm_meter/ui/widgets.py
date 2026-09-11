@@ -136,7 +136,12 @@ class MetricView(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(3)
+        layout.setSpacing(3 if not metric.featured else 4)
+
+        if metric.featured:
+            layout.setContentsMargins(0, 2, 0, 3)
+            self._add_featured_content(layout, metric, palette)
+            return
 
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
@@ -160,6 +165,20 @@ class MetricView(QWidget):
             layout.addLayout(bottom)
         elif metric.detail:
             layout.addWidget(_label(self, metric.detail, palette.faint, -3, wrap=True))
+
+    def _add_featured_content(
+        self, layout: QVBoxLayout, metric: Metric, palette: Palette
+    ) -> None:
+        """Render a balance as a provider-specific focal value, never a meter."""
+        label = _label(self, metric.label, palette.subtle, 2, QFont.Weight.DemiBold)
+        layout.addWidget(label)
+        if metric.value:
+            value_color = palette.faint if metric.muted else palette.text
+            layout.addWidget(
+                _label(self, metric.value, value_color, 9, QFont.Weight.Bold)
+            )
+        if metric.detail:
+            layout.addWidget(_label(self, metric.detail, palette.faint, -2, wrap=True))
 
 
 class SectionView(QWidget):

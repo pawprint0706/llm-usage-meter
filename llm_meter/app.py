@@ -55,6 +55,7 @@ class MeterApp(QObject):
         self._providers_by_id = {provider.id: provider for provider in self.providers}
         self._tray_ink_light: Optional[bool] = None
         self._tray_percent: Optional[float] = None
+        self._tray_provider_id: Optional[str] = None
         self._popup_hidden_at = 0
         self._popup_show_deadline_ms = 0
         self._pending_tray_rect: Optional[QRect] = None
@@ -338,21 +339,46 @@ class MeterApp(QObject):
         provider = self._gauge_provider()
         return provider.snapshot.gauge_percent if provider else None
 
+    def tray_selection_changed(self) -> None:
+        """Refresh the mark immediately when the popup changes provider tabs."""
+        self._update_tray_icon()
+
+    def _tray_provider(self) -> Optional[Provider]:
+        """Return the provider that determines the current menu-bar mark."""
+        selected = self.popup.selected_provider_id
+        if selected == "openrouter":
+            provider = self._providers_by_id.get(selected)
+            if provider is not None and provider.enabled:
+                return provider
+        return self._gauge_provider()
+
     def _update_tray_icon(self, force: bool = False) -> None:
         light_ink = theme.tray_needs_light_ink()
-        percent = self._gauge_percent()
-        if not force and light_ink == self._tray_ink_light and percent == self._tray_percent:
+        provider = self._tray_provider()
+        percent = provider.snapshot.gauge_percent if provider and provider.snapshot else None
+        provider_id = provider.id if provider else None
+        if (
+            not force
+            and light_ink == self._tray_ink_light
+            and percent == self._tray_percent
+            and provider_id == self._tray_provider_id
+        ):
             return
         self._tray_ink_light = light_ink
         self._tray_percent = percent
+        self._tray_provider_id = provider_id
         template = sys.platform == "darwin"
         color = QColor("#000000") if template or not light_ink else QColor("#FFFFFF")
         icon = QIcon()
         for size in TRAY_ICON_SIZES:
-            icon.addPixmap(glyphs.gauge_pixmap(size, percent, color))
+            pixmap = (
+                glyphs.provider_pixmap("openrouter", size, color)
+                if provider_id == "openrouter"
+                else glyphs.gauge_pixmap(size, percent, color)
+            )
+            icon.addPixmap(pixmap)
         icon.setIsMask(template)
         self.tray.setIcon(icon)
-        provider = self._gauge_provider()
         tooltip = tr("LLM 사용량", "LLM usage")
         if provider is not None:
             tooltip = tr(

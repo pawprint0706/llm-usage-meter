@@ -56,6 +56,7 @@ class Metric:
     percent: Optional[float] = None
     detail: Optional[str] = None
     muted: bool = False
+    featured: bool = False
 
 
 @dataclass

@@ -54,18 +54,6 @@ class CreditsData:
     def balance(self) -> float:
         return self.total_credits - self.total_usage
 
-    @property
-    def percent(self) -> Optional[float]:
-        """Spent share of every credit ever purchased; 100 means balance 0.
-
-        None when there is nothing to compare against (no credit ever
-        purchased), since the meter has no denominator.
-        """
-        if self.total_credits <= 0:
-            return None
-        return max(0.0, min(100.0, self.total_usage / self.total_credits * 100.0))
-
-
 def _number(value: Any) -> Optional[float]:
     """Accept both numbers and decimal strings."""
     if isinstance(value, bool) or value is None:

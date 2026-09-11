@@ -563,6 +563,9 @@ class PopupWindow(QWidget):
     def _on_tab_changed(self, index: int) -> None:
         if 0 <= index < len(self._tab_ids):
             self._selected_provider_id = self._tab_ids[index]
+        tray_selection_changed = getattr(self._app, "tray_selection_changed", None)
+        if tray_selection_changed is not None:
+            tray_selection_changed()
         tabs = self._content.findChild(QTabWidget)
         if tabs is not None:
             self._refresh_tab_labels(tabs, theme.current())

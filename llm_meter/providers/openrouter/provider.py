@@ -1,4 +1,4 @@
-"""OpenRouter provider: prepaid credit balance as a single meter."""
+"""OpenRouter provider: prepaid credit balance as a prominent balance."""
 
 import logging
 from dataclasses import dataclass
@@ -92,33 +92,26 @@ class OpenRouterProvider(Provider):
     def render(self, data: Loaded) -> Snapshot:
         return Snapshot(
             sections=[self._credit_section(data.credits)],
-            gauge_percent=data.credits.percent,
         )
 
     def _credit_section(self, credits: api.CreditsData) -> Section:
         left = max(0.0, credits.balance)
-        total = fmt.money_compact(credits.total_credits)
-        percent = credits.percent
-        # The metric row already names itself "Credits", so the section carries
-        # no title of its own.
-        if percent is None:
-            # No credit ever purchased: nothing to compare the meter against.
-            metrics = [
-                Metric(
-                    label=tr("크레딧", "Credits"),
-                    value=f"{fmt.money(left)} / {total}",
-                    muted=True,
-                )
-            ]
-        else:
-            metrics = [
-                Metric(
-                    label=tr("크레딧", "Credits"),
-                    value=f"{fmt.money_compact(left)} / {total}",
-                    percent=percent,
-                    muted=left <= 0,
-                )
-            ]
+        # Lifetime purchases are not an allowance. Keep the current balance as
+        # the focal value and expose the cumulative purchase total as context,
+        # never as a misleading meter denominator.
+        metrics = [
+            Metric(
+                label=tr("크레딧", "Credits"),
+                value=fmt.money(left),
+                muted=left <= 0,
+                featured=True,
+            ),
+            Metric(
+                label=tr("누적 충전", "Total purchased"),
+                value=fmt.money(max(0.0, credits.total_credits)),
+                muted=credits.total_credits <= 0,
+            ),
+        ]
         return Section(title="", metrics=metrics, url=api.CREDITS_PAGE)
 
     # ------------------------------------------------------------------ menu

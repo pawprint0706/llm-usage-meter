@@ -9,29 +9,22 @@ PAYLOAD = {"data": {"total_credits": 100.5, "total_usage": 25.75}}
 
 
 class ParseCreditsTests(unittest.TestCase):
-    def test_balance_and_percent_are_derived_from_the_totals(self):
+    def test_balance_is_derived_from_the_totals(self):
         data = api.parse_credits(PAYLOAD)
 
         self.assertEqual(data.total_credits, 100.5)
         self.assertEqual(data.total_usage, 25.75)
         self.assertAlmostEqual(data.balance, 74.75)
-        self.assertAlmostEqual(data.percent, 25.621890547263682)
 
     def test_decimal_strings_are_accepted(self):
         data = api.parse_credits({"data": {"total_credits": "100.5", "total_usage": "25.75"}})
 
         self.assertAlmostEqual(data.balance, 74.75)
 
-    def test_usage_over_the_purchased_credits_clamps_the_meter(self):
+    def test_usage_over_the_purchased_credits_can_produce_a_negative_balance(self):
         data = api.parse_credits({"data": {"total_credits": 10, "total_usage": 12}})
 
-        self.assertEqual(data.percent, 100.0)
         self.assertEqual(data.balance, -2.0)
-
-    def test_no_purchased_credit_has_no_meter(self):
-        data = api.parse_credits({"data": {"total_credits": 0, "total_usage": 0}})
-
-        self.assertIsNone(data.percent)
 
     def test_payloads_that_cannot_be_credits_are_rejected(self):
         for payload in (

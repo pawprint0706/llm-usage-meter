@@ -16,3 +16,6 @@ Thumbs.db
 
 # Logs and local artifacts
 *.log
+
+# Command Code tooling (taste, local plans)
+.commandcode/

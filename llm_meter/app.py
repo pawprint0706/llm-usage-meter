@@ -61,6 +61,7 @@ class MeterApp(QObject):
         self._pending_tray_rect: Optional[QRect] = None
 
         self.popup = PopupWindow(self)
+        self.popup.set_selected_provider(self.cfg.selected_provider)
         self.tray = QSystemTrayIcon()
         self.tray.activated.connect(self._on_tray_activated)
 
@@ -340,8 +341,16 @@ class MeterApp(QObject):
         return provider.snapshot.gauge_percent if provider else None
 
     def tray_selection_changed(self) -> None:
-        """Refresh the mark immediately when the popup changes provider tabs."""
+        """Follow the popup's provider tab: refresh the mark, remember the choice."""
+        self._remember_selected_provider()
         self._update_tray_icon()
+
+    def _remember_selected_provider(self) -> None:
+        provider_id = self.popup.selected_provider_id
+        if not provider_id or provider_id == self.cfg.selected_provider:
+            return
+        self.cfg.selected_provider = provider_id
+        config.save_config(self.cfg)
 
     def _tray_provider(self) -> Optional[Provider]:
         """Return the provider that determines the current menu-bar mark."""

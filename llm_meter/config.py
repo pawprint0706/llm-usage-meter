@@ -10,7 +10,7 @@ import logging
 import os
 import threading
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,7 @@ class Config:
     refresh_interval: int = DEFAULT_REFRESH_INTERVAL
     provider_order: list[str] = field(default_factory=list)
     providers: dict[str, dict[str, Any]] = field(default_factory=dict)
+    selected_provider: Optional[str] = None
 
     def provider(self, provider_id: str) -> dict[str, Any]:
         """Per-provider settings bag, created on first access."""
@@ -105,10 +106,15 @@ def load_config() -> Config:
             if isinstance(item, str) and item and item not in provider_order:
                 provider_order.append(item)
 
+    selected_provider = data.get("selected_provider")
+    if not isinstance(selected_provider, str) or not selected_provider:
+        selected_provider = None
+
     return Config(
         refresh_interval=interval,
         provider_order=provider_order,
         providers=providers,
+        selected_provider=selected_provider,
     )
 
 
@@ -122,6 +128,7 @@ def save_config(cfg: Config) -> None:
         "refresh_interval": cfg.refresh_interval,
         "provider_order": cfg.provider_order,
         "providers": cfg.providers,
+        "selected_provider": cfg.selected_provider,
     }
     temp_path = path + ".tmp"
     with _write_lock:

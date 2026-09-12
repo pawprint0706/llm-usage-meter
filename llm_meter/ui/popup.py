@@ -196,6 +196,13 @@ class PopupWindow(QWidget):
         """The tab the popup last showed, so the tray needle can follow it."""
         return self._selected_provider_id
 
+    def set_selected_provider(self, provider_id: Optional[str]) -> None:
+        """Seed the tab the popup opens on, e.g. the one used last session.
+
+        A stale or disabled id is dropped when the tabs are built.
+        """
+        self._selected_provider_id = provider_id
+
     # ----------------------------------------------------------------- layout
 
     def _build(self) -> None:
@@ -524,6 +531,7 @@ class PopupWindow(QWidget):
         tabs.currentChanged.connect(self._on_tab_changed)
         self._add(self._content_layout, tabs)
         tabs.setCurrentIndex(self._tab_ids.index(selected))
+        self._notify_tray_selection()
 
     def _tab_label(self, provider, palette: theme.Palette, *, selected: bool) -> QWidget:
         """Pre-composited icon-only mark so it stays vertically aligned on macOS.
@@ -560,12 +568,21 @@ class PopupWindow(QWidget):
             )
         tabs.tabBar().updateGeometry()
 
-    def _on_tab_changed(self, index: int) -> None:
-        if 0 <= index < len(self._tab_ids):
-            self._selected_provider_id = self._tab_ids[index]
+    def _notify_tray_selection(self) -> None:
+        """Let the app follow the selected tab with its menu-bar mark.
+
+        Also called after the initial build: ``setCurrentIndex`` does not emit
+        ``currentChanged`` when the index is unchanged, so without this the mark
+        would keep the previous provider until some unrelated repaint.
+        """
         tray_selection_changed = getattr(self._app, "tray_selection_changed", None)
         if tray_selection_changed is not None:
             tray_selection_changed()
+
+    def _on_tab_changed(self, index: int) -> None:
+        if 0 <= index < len(self._tab_ids):
+            self._selected_provider_id = self._tab_ids[index]
+        self._notify_tray_selection()
         tabs = self._content.findChild(QTabWidget)
         if tabs is not None:
             self._refresh_tab_labels(tabs, theme.current())

@@ -39,6 +39,16 @@ class ConfigFileTests(unittest.TestCase):
         self.assertFalse(loaded.is_provider_enabled("codex"))
         self.assertTrue(loaded.is_provider_enabled("opencode"))
 
+    def test_round_trip_keeps_the_selected_provider(self):
+        config.save_config(config.Config(selected_provider="openrouter"))
+
+        self.assertEqual(config.load_config().selected_provider, "openrouter")
+
+    def test_a_corrupt_selected_provider_is_dropped(self):
+        self.write(json.dumps({"selected_provider": 7}))
+
+        self.assertIsNone(config.load_config().selected_provider)
+
     def test_saved_file_is_owner_only(self):
         config.save_config(config.Config())
 

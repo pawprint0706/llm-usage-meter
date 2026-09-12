@@ -44,6 +44,7 @@ class FakeHost:
         self.opened: list[str] = []
         self.quit_calls = 0
         self.refresh_calls = 0
+        self.tray_selection_calls = 0
 
     def open_url(self, url: str) -> None:
         self.opened.append(url)
@@ -62,6 +63,9 @@ class FakeHost:
 
     def quit(self) -> None:
         self.quit_calls += 1
+
+    def tray_selection_changed(self) -> None:
+        self.tray_selection_calls += 1
 
 
 class PopupTestCase(unittest.TestCase):
@@ -144,6 +148,44 @@ class TrayMarkTests(unittest.TestCase):
         self.assertEqual(gauge.call_count, 8)
 
 
+class SelectedProviderPersistenceTests(unittest.TestCase):
+    """The popup's tab choice is saved so the next launch reopens on it."""
+
+    def _app(self, selected: str):
+        app = MeterApp.__new__(MeterApp)
+        app.cfg = Config()
+        app.popup = SimpleNamespace(selected_provider_id=selected)
+        app._tray_ink_light = None
+        app._tray_percent = None
+        app._tray_provider_id = None
+        app.tray = Mock()
+        app.providers = []
+        app._providers_by_id = {}
+        return app
+
+    def test_a_new_selection_is_saved(self):
+        app = self._app("openrouter")
+
+        with patch("llm_meter.app.theme.tray_needs_light_ink", return_value=False), patch(
+            "llm_meter.app.config.save_config"
+        ) as save:
+            app.tray_selection_changed()
+
+        save.assert_called_once_with(app.cfg)
+        self.assertEqual(app.cfg.selected_provider, "openrouter")
+
+    def test_an_unchanged_selection_is_not_rewritten(self):
+        app = self._app("codex")
+        app.cfg.selected_provider = "codex"
+
+        with patch("llm_meter.app.theme.tray_needs_light_ink", return_value=False), patch(
+            "llm_meter.app.config.save_config"
+        ) as save:
+            app.tray_selection_changed()
+
+        save.assert_not_called()
+
+
 class ContentTests(PopupTestCase):
     def test_one_tab_per_enabled_service(self):
         self.make_ready()
@@ -177,6 +219,36 @@ class ContentTests(PopupTestCase):
             [self.tabs().tabToolTip(i) for i in range(self.tabs().count())],
             ["OpenCode", "Codex", "Cursor", "Ollama", "OpenRouter"],
         )
+
+    def test_building_the_tabs_reports_the_default_selection_to_the_tray(self):
+        """The first tab is current without an index change, so ``currentChanged``
+        never fires and macOS (which has no polling timer) would keep the old mark."""
+        self.make_ready()
+        self.assertEqual(self.host.tray_selection_calls, 0)
+
+        self.popup.rebuild()
+
+        self.assertEqual(self.popup._selected_provider_id, self.providers[0].id)
+        self.assertEqual(self.host.tray_selection_calls, 1)
+
+    def test_the_popup_opens_on_the_seeded_tab(self):
+        """A remembered tab wins over the first enabled one."""
+        self.make_ready()
+        self.popup.set_selected_provider("ollama")
+
+        self.popup.rebuild()
+
+        self.assertEqual(self.popup._selected_provider_id, "ollama")
+        self.assertEqual(self.tabs().currentIndex(), self.popup._tab_ids.index("ollama"))
+
+    def test_a_seeded_tab_that_is_disabled_falls_back_to_the_first(self):
+        self.make_ready()
+        self.cfg.set_provider_enabled("ollama", False)
+        self.popup.set_selected_provider("ollama")
+
+        self.popup.rebuild()
+
+        self.assertEqual(self.popup._selected_provider_id, self.popup._tab_ids[0])
 
     def test_a_disabled_service_is_left_out(self):
         self.make_ready()

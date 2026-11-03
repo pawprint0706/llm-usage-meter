@@ -44,16 +44,11 @@ def codex_usage(**overrides) -> codex_api.UsageData:
     return data
 
 
-def console(**overrides) -> opencode_api.ConsoleData:
-    data = opencode_api.ConsoleData(
-        go=opencode_api.GoUsage(
-            rolling={"status": "ok", "usagePercent": 53, "resetInSec": 3660},
-            weekly={"status": "ok", "usagePercent": 20, "resetInSec": 108_000},
-            monthly={"status": "ok", "usagePercent": 10, "resetInSec": 400_000},
-        ),
-        zen=opencode_api.ZenBilling(
-            balance=16.1308929, monthly_limit=20, monthly_usage=3.87, reload_enabled=False
-        ),
+def go_usage(**overrides) -> opencode_api.GoUsage:
+    data = opencode_api.GoUsage(
+        rolling=opencode_api.UsageWindow(53, "ok", in_hours(1.025)),
+        weekly=opencode_api.UsageWindow(20, "ok", in_hours(30)),
+        monthly=opencode_api.UsageWindow(10, "ok", in_hours(111)),
     )
     for key, value in overrides.items():
         setattr(data, key, value)
@@ -214,270 +209,134 @@ class OpenCodeRenderTests(unittest.TestCase):
     def setUp(self):
         self.ui = FakeUi()
         self.cfg = Config()
-        self.cfg.provider("opencode")["workspace_id"] = "wrk_1"
         self.provider = OpenCodeProvider(self.cfg, self.ui)
 
     def render(self, data=None):
-        return self.provider.render(Loaded(console=data or console(), monotonic=time.monotonic()))
+        return self.provider.render(Loaded(go=data or go_usage()))
 
-    def test_go_usage_and_zen_credits_are_separate_sections(self):
+    def test_used_percentages_drive_the_metrics_and_shortest_window_gauge(self):
         snapshot = self.render()
-
-        self.assertEqual(
-            [section.title for section in snapshot.sections], ["Go plan usage", "Zen credits"]
-        )
-        self.assertEqual(snapshot.sections[0].url, opencode_api.go_page("wrk_1"))
-        self.assertEqual(snapshot.sections[1].url, opencode_api.zen_page("wrk_1"))
-
-    def test_each_period_is_priced_against_its_limit(self):
-        metrics = self.render().sections[0].metrics
-
-        self.assertEqual([metric.label for metric in metrics], ["5h", "Week", "Month"])
-        self.assertEqual(metrics[0].value, "$5.64 / $12")
-        self.assertEqual(metrics[1].value, "$24.00 / $30")
-        self.assertEqual(metrics[2].value, "$54.00 / $60")
-        self.assertEqual(metrics[0].detail, "resets in 1h")
-
-    def test_configured_limits_replace_the_defaults(self):
-        self.cfg.provider("opencode")["limits"] = {"rolling": 20}
-
-        metrics = self.render().sections[0].metrics
-
-        self.assertEqual(metrics[0].value, "$9.40 / $20")
-        self.assertEqual(metrics[1].value, "$24.00 / $30")
-
-    def test_a_period_without_a_percentage_shows_its_status(self):
-        data = console(
-            go=opencode_api.GoUsage(
-                rolling={"status": "error", "message": "x"}, weekly={}, monthly={}
-            )
-        )
-
-        metrics = self.render(data).sections[0].metrics
-
-        self.assertEqual(metrics[0].value, "error")
-        self.assertTrue(metrics[0].muted)
-        self.assertEqual(metrics[1].value, "n/a")
-
-    def test_a_balance_billed_workspace_says_so(self):
-        data = console(
-            go=opencode_api.GoUsage(
-                rolling={"status": "ok", "usagePercent": 0},
-                weekly={},
-                monthly={},
-                use_balance=True,
-            )
-        )
-
-        self.assertEqual(
-            self.render(data).sections[0].note, "This workspace bills against Zen credits"
-        )
-
-    def test_zen_shows_the_balance_and_the_monthly_spend(self):
-        metrics = self.render().sections[1].metrics
-
-        self.assertEqual(metrics[0].value, "$16.13")
-        self.assertEqual(metrics[1].label, "This month")
-        self.assertEqual(metrics[1].value, "$16.13 / $20")
-        self.assertAlmostEqual(metrics[1].percent, 19.35)
-        self.assertEqual(metrics[2].value, "Off")
-
-    def test_auto_reload_reports_its_trigger(self):
-        data = console(
-            zen=opencode_api.ZenBilling(
-                balance=4.0, reload_enabled=True, reload_amount=20, reload_trigger=5
-            )
-        )
-
-        metric = self.render(data).sections[1].metrics[-1]
-
-        self.assertEqual(metric.label, "Auto-reload")
-        self.assertEqual(metric.value, "$20")
-        self.assertEqual(metric.detail, "when below $5")
-
-    def test_a_previous_month_figure_counts_as_zero_usage(self):
-        stale = (datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)).date()
-        data = console(
-            zen=opencode_api.ZenBilling(
-                balance=16.1308929,
-                monthly_limit=20,
-                monthly_usage=3.87,
-                time_monthly_usage_updated=f"{stale.isoformat()}T05:29:20.000Z",
-            )
-        )
-
-        metric = self.render(data).sections[1].metrics[1]
-
-        self.assertEqual(metric.label, "This month")
-        self.assertEqual(metric.value, "$20.00 / $20")
-        self.assertEqual(metric.percent, 0)
-        self.assertEqual(metric.detail, f"as of {stale.month}/{stale.day} — not refreshed")
-
-    def test_a_current_month_figure_is_shown_as_is(self):
-        now = datetime.now(timezone.utc)
-        fresh = f"{now.year:04d}-{now.month:02d}-{now.day:02d}T00:00:00.000Z"
-        data = console(
-            zen=opencode_api.ZenBilling(
-                balance=16.1308929,
-                monthly_limit=20,
-                monthly_usage=3.87,
-                time_monthly_usage_updated=fresh,
-            )
-        )
-
-        metric = self.render(data).sections[1].metrics[1]
-
-        self.assertEqual(metric.value, "$16.13 / $20")
-        self.assertAlmostEqual(metric.percent, 19.35)
-        self.assertIsNone(metric.detail)
-
-    def test_a_missing_billing_record_is_explained(self):
-        section = self.render(console(zen=None)).sections[1]
-
-        self.assertEqual(section.metrics, [])
-        self.assertEqual(section.note, "Could not fetch the credit info")
-
-    def test_a_missing_go_plan_is_explained_without_hiding_zen(self):
-        snapshot = self.render(console(go=None))
-
-        section = snapshot.sections[0]
-        self.assertEqual(section.metrics, [])
-        self.assertEqual(
-            section.note, "Could not fetch the Go plan usage. Check your subscription"
-        )
-        self.assertEqual(section.url, opencode_api.go_page("wrk_1"))
-        self.assertIsNone(snapshot.gauge_percent)
-        self.assertEqual(snapshot.sections[1].metrics[0].value, "$16.13")
-
-    def test_the_gauge_follows_the_shortest_window(self):
-        snapshot = self.render()
-
+        self.assertEqual(len(snapshot.sections), 1)
+        metrics = snapshot.sections[0].metrics
+        self.assertEqual([metric.percent for metric in metrics], [53, 20, 10])
+        self.assertEqual([metric.value for metric in metrics],
+                         ["53.0% used", "20.0% used", "10.0% used"])
         self.assertEqual(snapshot.gauge_percent, 53)
 
-    def test_countdowns_shrink_as_time_passes(self):
-        loaded = Loaded(console=console(), monotonic=time.monotonic() - 1800)
+    def test_countdowns_use_absolute_resets_and_shrink_without_a_fetch(self):
+        now = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+        data = Loaded(go=go_usage(
+            rolling=opencode_api.UsageWindow(1.25, "ok", now + timedelta(hours=1)),
+        ))
+        with patch("llm_meter.providers.opencode.provider.datetime") as clock:
+            clock.now.return_value = now
+            initial = self.provider.render(data).sections[0].metrics[0]
+            clock.now.return_value = now + timedelta(minutes=30)
+            later = self.provider.render(data).sections[0].metrics[0]
+            clock.now.return_value = now + timedelta(hours=2)
+            expired = self.provider.render(data).sections[0].metrics[0]
+        self.assertEqual(initial.detail, "resets in 1h")
+        self.assertEqual(later.detail, "resets in 30m")
+        self.assertEqual(expired.detail, "resets in <1m")
 
-        metrics = self.provider.render(loaded).sections[0].metrics
+    def test_rate_limited_below_100_percent_is_visible_without_faking_usage(self):
+        metric = self.render(go_usage(
+            rolling=opencode_api.UsageWindow(33, "rate-limited", in_hours(1)),
+        )).sections[0].metrics[0]
+        self.assertEqual(metric.percent, 33)
+        self.assertIn("rate-limited", metric.detail)
+        self.assertEqual(metric.value, "33.0% used")
 
-        self.assertEqual(metrics[0].detail, "resets in 30m")
+    def test_zero_and_full_usage_are_not_inverted(self):
+        snapshot = self.render(go_usage(
+            rolling=opencode_api.UsageWindow(0, "ok", in_hours(1)),
+            monthly=opencode_api.UsageWindow(100, "rate-limited", in_hours(2)),
+        ))
+        self.assertEqual(snapshot.gauge_percent, 0)
+        self.assertEqual(snapshot.sections[0].metrics[0].value, "0.0% used")
+        self.assertEqual(snapshot.sections[0].metrics[2].value, "100.0% used")
 
 
-class OpenCodeSessionTests(unittest.TestCase):
+class OpenCodeKeyTests(unittest.TestCase):
+    KEY = "oc_sk_" + "k" * 40
+
     def setUp(self):
         self.ui = FakeUi()
         self.provider = OpenCodeProvider(Config(), self.ui)
-        self.saved: list[str] = []
-        # Nothing here may touch the real credential store or config file, and the
-        # card must start signed out however the developer's keychain looks.
+        self.saved = []
         for patcher in (
-            patch(
-                "llm_meter.providers.opencode.provider.auth.load_session_key",
-                return_value=None,
-            ),
-            patch(
-                "llm_meter.providers.opencode.provider.auth.save_session_key",
-                side_effect=self.saved.append,
-            ),
-            patch("llm_meter.providers.opencode.provider.config_module.save_config"),
+            patch("llm_meter.providers.opencode.provider.auth.load_key", return_value=None),
+            patch("llm_meter.providers.opencode.provider.auth.save_key", side_effect=self.saved.append),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def entry(self, label: str):
+    def entry(self, label):
         return next(item for item in self.provider.menu() if item.label == label)
 
-    def test_a_signed_out_card_offers_both_ways_to_add_a_key(self):
-        labels = [entry.label for entry in self.provider.menu()]
-
-        self.assertIn("Paste session key from clipboard", labels)
-        self.assertIn("Enter session key...", labels)
-        self.assertNotIn("Sign out", labels)
-
-    def test_a_signed_in_card_hides_the_session_key_entries(self):
-        self.ui.answer = "s" * 40
+    def adopt(self):
+        self.ui.answer = self.KEY
         self.provider.primary_action().run()
 
-        labels = [entry.label for entry in self.provider.menu()]
-
-        self.assertNotIn("Paste session key from clipboard", labels)
-        self.assertNotIn("Enter session key...", labels)
-        self.assertIn("Sign out", labels)
-
-    def test_pasting_a_cookie_value_stores_the_key_and_refreshes(self):
-        self.ui.clipboard = "auth=" + "k" * 40 + ";"
-
-        self.entry("Paste session key from clipboard").run()
-
-        self.assertEqual(self.saved, ["k" * 40])
+    def test_pasting_a_bearer_header_authenticates_and_requests_a_refresh(self):
+        self.ui.clipboard = "Authorization: Bearer " + self.KEY
+        self.entry("Paste API key from clipboard").run()
+        self.assertEqual(self.saved, [self.KEY])
         self.assertEqual(self.ui.refresh_requests, ["opencode"])
         self.assertTrue(self.provider.is_authenticated())
 
-    def test_clipboard_junk_is_refused(self):
-        self.ui.clipboard = "hello world"
-
-        self.entry("Paste session key from clipboard").run()
-
+    def test_a_cookie_pair_does_not_authenticate_or_store_a_key(self):
+        self.ui.clipboard = "auth=" + "k" * 40 + ";"
+        self.entry("Paste API key from clipboard").run()
         self.assertEqual(self.saved, [])
-        self.assertEqual(self.provider.message, "The clipboard does not look like a session key")
+        self.assertFalse(self.provider.is_authenticated())
 
-    def test_the_prompt_explains_where_to_find_the_cookie(self):
-        self.ui.answer = "s" * 40
-
-        self.provider.primary_action().run()
-
-        title, prompt, secret = self.ui.prompts[0]
-        self.assertEqual(title, "OpenCode session key")
-        self.assertIn("DevTools", prompt)
-        self.assertTrue(secret)
-        self.assertEqual(self.saved, ["s" * 40])
-
-    def test_cancelling_the_prompt_changes_nothing(self):
+    def test_cancelling_key_replacement_keeps_the_existing_login(self):
+        self.adopt()
         self.ui.answer = None
-
         self.provider.primary_action().run()
+        self.assertEqual(self.provider.api_key, self.KEY)
+        self.assertEqual(self.saved, [self.KEY])
 
-        self.assertEqual(self.saved, [])
-        self.assertEqual(self.provider.message, "")
-
-    def test_a_rejected_session_key_signs_the_card_out(self):
-        self.ui.answer = "s" * 40
-        self.provider.primary_action().run()
-        self.provider.settings["workspace_id"] = "wrk_1"
-
-        with patch(
-            "llm_meter.providers.opencode.provider.auth.delete_session_key"
-        ) as delete, patch(
-            "llm_meter.providers.opencode.provider.api.fetch_console",
+    def test_a_rejected_key_discards_the_snapshot_and_signs_out(self):
+        self.adopt()
+        self.provider.snapshot = self.provider.render(Loaded(go=go_usage()))
+        with patch("llm_meter.providers.opencode.provider.auth.delete_key"), patch(
+            "llm_meter.providers.opencode.provider.api.fetch_usage",
             side_effect=opencode_api.AuthExpiredError("gone"),
         ):
             self.provider.refresh()
-
-        delete.assert_called_once()
         self.assertIs(self.provider.state, State.SIGNED_OUT)
+        self.assertIsNone(self.provider.snapshot)
+        self.assertFalse(self.provider.is_authenticated())
         self.assertTrue(self.ui.notified)
 
-    def test_the_pages_open_even_before_a_workspace_is_known(self):
-        self.entry("Open Go usage page").run()
-        self.entry("Open Zen credits page").run()
-        self.entry("Open stats page").run()
+    def test_forbidden_network_and_bad_data_keep_the_key_and_last_reading(self):
+        import requests
+        for error in (opencode_api.ScopeError("forbidden"), requests.Timeout("timeout"),
+                      opencode_api.ParseError("bad payload"), opencode_api.FetchError("HTTP 500")):
+            with self.subTest(error=error):
+                self.adopt()
+                previous = self.provider.render(Loaded(go=go_usage()))
+                self.provider.snapshot = previous
+                with patch("llm_meter.providers.opencode.provider.auth.delete_key") as delete, patch(
+                    "llm_meter.providers.opencode.provider.api.fetch_usage", side_effect=error,
+                ):
+                    self.provider.refresh()
+                self.assertIs(self.provider.state, State.ERROR)
+                self.assertTrue(self.provider.is_authenticated())
+                self.assertIs(self.provider.snapshot, previous)
+                delete.assert_not_called()
 
-        self.assertEqual(self.ui.opened, [opencode_api.CONSOLE_BASE] * 3)
-
-    def test_the_pages_use_the_workspace_once_it_is_known(self):
-        self.provider.settings["workspace_id"] = "wrk_1"
-
-        self.entry("Open Go usage page").run()
-        self.entry("Open Zen credits page").run()
-        self.entry("Open stats page").run()
-
-        self.assertEqual(
-            self.ui.opened,
-            [
-                opencode_api.go_page("wrk_1"),
-                opencode_api.zen_page("wrk_1"),
-                opencode_api.stats_page("wrk_1"),
-            ],
-        )
+    def test_replacing_a_key_discards_the_other_accounts_cached_reading(self):
+        self.adopt()
+        self.provider.data = Loaded(go=go_usage())
+        self.provider.snapshot = self.provider.render(self.provider.data)
+        self.ui.answer = "oc_sk_" + "n" * 40
+        self.provider.primary_action().run()
+        self.assertIsNone(self.provider.snapshot)
+        self.assertIsNone(self.provider.data)
+        self.assertEqual(self.provider.api_key, self.ui.answer)
 
 
 def ollama_settings(**overrides) -> ollama_api.SettingsData:

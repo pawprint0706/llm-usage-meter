@@ -154,48 +154,30 @@ class CodexRefreshTests(StoreBackedTestCase):
             codex_auth.refresh_credentials(credentials(), session=session)
 
 
-class SessionKeyCleanupTests(unittest.TestCase):
-    def test_a_plain_key_passes_through(self):
-        self.assertEqual(opencode_auth.clean_session_key("k" * 40), "k" * 40)
+class OpenCodeKeyCleanupTests(unittest.TestCase):
+    KEY = "oc_sk_" + "k" * 40
 
-    def test_a_pasted_cookie_pair_is_unwrapped(self):
-        self.assertEqual(opencode_auth.clean_session_key('auth="' + "k" * 40 + '";'), "k" * 40)
-
-    def test_surrounding_whitespace_and_quotes_are_dropped(self):
-        self.assertEqual(opencode_auth.clean_session_key("  '" + "k" * 40 + "'  "), "k" * 40)
-
-    def test_values_that_cannot_be_keys_are_rejected(self):
-        for value in (None, "", "short", "auth=", "two words in here somewhere"):
+    def test_plain_keys_and_bearer_headers_are_accepted(self):
+        for value in (self.KEY, f"Bearer {self.KEY}", f'Authorization: Bearer "{self.KEY}";'):
             with self.subTest(value=value):
-                self.assertIsNone(opencode_auth.clean_session_key(value))
+                self.assertEqual(opencode_auth.clean_key(value), self.KEY)
 
-    def test_the_instructions_point_at_the_auth_cookie(self):
-        text = opencode_auth.instructions()
+    def test_cookies_and_malformed_keys_are_rejected(self):
+        for value in (None, "", "short", "auth=" + "k" * 40, "two words in here somewhere",
+                      self.KEY + "\r\nHeader: injected"):
+            with self.subTest(value=value):
+                self.assertIsNone(opencode_auth.clean_key(value))
 
-        self.assertIn("opencode.ai/auth", text)
-        self.assertIn("'auth'", text)
 
+class OpenCodeKeyStorageTests(StoreBackedTestCase):
+    def test_a_stored_browser_cookie_is_never_used_as_an_api_key(self):
+        keystore.set("opencode-session", "old-cookie")
 
-class SessionKeyStorageTests(StoreBackedTestCase):
-    def test_round_trip(self):
-        opencode_auth.save_session_key("k" * 40)
-
-        self.assertEqual(opencode_auth.load_session_key(), "k" * 40)
-
-    def test_nothing_stored_reads_as_signed_out(self):
-        self.assertIsNone(opencode_auth.load_session_key())
-
-    def test_signing_out_clears_the_store(self):
-        opencode_auth.save_session_key("k" * 40)
-
-        opencode_auth.delete_session_key()
-
-        self.assertIsNone(opencode_auth.load_session_key())
-
-    def test_a_store_failure_is_reported_as_an_auth_error(self):
-        with patch.object(keystore, "set", side_effect=keystore.KeystoreError("locked")):
-            with self.assertRaises(opencode_auth.AuthError):
-                opencode_auth.save_session_key("k" * 40)
+        self.assertIsNone(opencode_auth.load_key())
+        opencode_auth.save_key("oc_sk_" + "k" * 40)
+        opencode_auth.delete_key()
+        self.assertIsNone(opencode_auth.load_key())
+        self.assertEqual(keystore.get("opencode-session"), "old-cookie")
 
 
 class OpenRouterKeyCleanupTests(unittest.TestCase):

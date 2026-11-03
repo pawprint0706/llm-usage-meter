@@ -5,7 +5,7 @@
 지원 서비스:
 
 - **Codex** (ChatGPT) — 플랜 사용량 윈도우, 구매한 크레딧 잔액, 사용량 한도 재설정권
-- **OpenCode** — Go 플랜 사용량(5시간 / 주간 / 월간)과 Zen 크레딧 잔액을 별도 섹션으로 구분
+- **OpenCode** — API 키로 조회하는 Go 플랜 사용률(5시간 / 주간 / 월간)
 - **Cursor** — 청구 주기 플랜 사용량(%)과 포함·보너스·온디맨드 지출
 - **Ollama** — 기본(월간 크레딧) 사용량과 모델별 요청 수, 추가 사용량 잔액
 - **OpenRouter** — 현재 크레딧 잔액
@@ -134,33 +134,31 @@ API 호출에서 HTTP 401 또는 403이 발생하면 refresh token으로 자격 
 ```text
 OpenCode                                       ⋯
 Go 플랜 사용량
-  5시간                              $12.00 / $12
-  ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬   4시간 59분 후 초기화
-  주간                               $24.30 / $30
+  5시간                               37.5% 사용
+  ▬▬▬▬▬▬▬▬▬▬▬▬▭▭▭▭▭▭▭▭   2시간 59분 후 초기화
+  주간                                19.0% 사용
   ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▭▭▭▭   1일 6시간 후 초기화
-  월간                              $22.80 / $60
+  월간                                62.0% 사용
   ▬▬▬▬▬▬▬▬▭▭▭▭▭▭▭▭▭▭▭▭   4일 16시간 후 초기화
-Zen 크레딧
-  잔액                                    $16.13
-  이번 달                              $16.13 / $20
-  자동 충전                                  꺼짐
 ```
 
-- **Go 플랜 사용량**: 콘솔이 알려주는 사용률(%)에 기간별 한도를 곱해 금액으로 환산하고, **남은 금액**으로 표시합니다. 기본 한도는 5시간 $12, 주간 $30, 월간 $60이며 설정 파일에서 바꿀 수 있습니다.
-- **Zen 크레딧**: 크레딧 잔액, 이번 달 남은 금액과 한도, 자동 충전 설정을 표시합니다. 워크스페이스가 Zen 크레딧으로 결제되는 경우 Go 섹션에 안내 문구가 추가됩니다.
+- API의 **사용한 비율**을 소수점 한 자리로 표시합니다. 바와 트레이 바늘은 다른 서비스와 동일하게 **남은 비율**을 나타냅니다.
+- 초기화 시각(`resetsAt`)으로 카운트다운을 계산합니다. `rate-limited`이면 100% 미만이어도 **사용 제한됨**을 표시합니다.
+- 금액 환산과 기간별 금액 한도 설정은 제거했습니다. **Zen 잔액은 표시하지 않습니다.** 사용량 API가 제공하는 Go 데이터만 수집하며, 홈페이지 HTML을 분석하지 않습니다.
 
-Go·Zen·통계 페이지는 `⋯` 메뉴의 해당 항목으로만 이동합니다. 로그인 전에는 세션 키 붙여넣기/입력도 같은 메뉴에 있고, 로그인 후에는 로그아웃만 남습니다.
+`⋯` 메뉴의 **콘솔 열기**에서 웹 콘솔로 이동합니다. 로그인 후에도 **API 키 입력...**으로 키를 교체할 수 있습니다.
 
-### OpenCode 세션 키
+### OpenCode API 키
 
-OpenCode 콘솔은 공개 API가 없어 브라우저 세션 쿠키를 그대로 사용합니다. 브라우저 쿠키를 직접 읽는 방식은 지원하지 않습니다(윈도우 크롬에서 사실상 동작하지 않아 제거했습니다). 세션 키는 **클립보드에서 붙여넣기** 또는 **직접 입력** 으로만 등록합니다.
+OpenCode 공식 클라이언트도 사용하는 `GET https://opencode.ai/zen/go/v1/usage`를 Bearer API 키로 호출합니다. omp 설치나 omp의 자격 증명 저장소는 필요하지 않습니다.
 
-1. <https://opencode.ai/auth> 에서 로그인합니다.
-2. 개발자 도구(F12) → 애플리케이션/저장소 → 쿠키 → `https://opencode.ai`
-3. `auth` 쿠키의 값을 복사합니다.
-4. 카드의 **세션 키 입력...** 에 붙여넣습니다. (`auth=`, 따옴표, 끝의 `;`는 자동으로 정리됩니다.)
+1. <https://opencode.ai/console>에서 로그인합니다.
+2. **Account → Personal API keys**에서 **Go 구독이 있는 워크스페이스**의 개인 API 키를 생성하고 복사합니다. 서비스 계정 키가 아닌 개인 키를 사용하세요.
+3. 카드의 **API 키 입력...** 또는 **클립보드에서 API 키 붙여넣기**로 등록합니다. (`Authorization: Bearer `, 따옴표, 끝의 `;`는 자동으로 정리됩니다.)
 
-워크스페이스 ID는 첫 조회 때 `/auth` 리다이렉트로 찾아 설정 파일에 캐시합니다. 세션이 만료되면 저장된 키를 지우고 알림을 띄웁니다.
+기존 브라우저 `auth` 쿠키는 사용할 수 없으며 자동 변환하지 않습니다. 저장된 세션 쿠키도 더 이상 읽지 않으므로 업그레이드 후 개인 API 키를 새로 등록해야 합니다. API 키는 별도 보안 저장소 항목 `opencode-api-key`에 저장합니다.
+
+HTTP 401이면 거부된 키를 삭제하고 재등록을 안내합니다. HTTP 403이면 개인 API 키 권한과 Go 구독을 확인하도록 안내하되 키는 유지합니다. 네트워크·서버·응답 형식 오류도 키와 마지막 조회값을 유지하고 오류 상태로 표시합니다.
 
 ## Cursor 카드
 
@@ -257,7 +255,7 @@ $74.75
 
 ## 자격 증명 보안
 
-Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰, Ollama 세션 쿠키, OpenRouter API 키는 OS 보안 저장소에 보관합니다.
+Codex OAuth 토큰, OpenCode API 키, Cursor에서 붙여넣은 세션 토큰, Ollama 세션 쿠키, OpenRouter API 키는 OS 보안 저장소에 보관합니다.
 
 - **macOS**: 키체인
 - **Windows**: Windows Credential Manager
@@ -275,11 +273,7 @@ Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰
   "provider_order": ["codex", "opencode", "cursor", "ollama", "openrouter"],
   "providers": {
     "codex": { "enabled": true },
-    "opencode": {
-      "enabled": true,
-      "workspace_id": "wrk_...",
-      "limits": { "rolling": 12, "weekly": 30, "monthly": 60 }
-    },
+    "opencode": { "enabled": true },
     "cursor": { "enabled": true },
     "ollama": { "enabled": true },
     "openrouter": { "enabled": true }
@@ -290,7 +284,7 @@ Codex OAuth 토큰, OpenCode 세션 키, Cursor에서 붙여넣은 세션 토큰
 - `refresh_interval`: API 갱신 주기(분). `10`, `30`, `60` 중 하나이며 설정 메뉴에서도 변경할 수 있습니다.
 - `provider_order`: 탭에 표시되는 서비스 순서. 설정 메뉴의 **탭 순서**로도 바꿀 수 있습니다. 목록에 없는 새 서비스는 뒤에 붙습니다.
 - `providers.<id>.enabled`: 탭 표시 여부.
-- `providers.opencode.limits`: Go 플랜의 기간별 금액 한도(달러). 요금제가 다르면 이 값을 조정하세요.
+- 이전 OpenCode 설정의 `workspace_id`와 `limits`는 더 이상 사용하지 않습니다. 워크스페이스는 API 키에 연결됩니다.
 - 로그 파일과 단일 인스턴스 잠금 파일도 같은 폴더에 저장됩니다.
 
 ### 부팅 시 자동 시작
@@ -364,7 +358,7 @@ Windows:
 .venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-테스트는 Codex 사용량·크레딧·재설정권 파싱과 401/403 단일 재시도, OpenCode 콘솔 SSR 파서와 Zen 빌링 추출, Cursor 사용량·지출 파싱과 세션 토큰 정리, Ollama 설정 페이지 파싱과 세션 쿠키 정리, OpenRouter 크레딧 응답 파싱과 API 키 정리, 자격 증명 압축·분할 저장, 설정 파일 읽기/쓰기, 금액·기간 표시, 팝업 렌더링(오프스크린 Qt)을 검사합니다. 실제 계정이나 네트워크 호출은 사용하지 않습니다.
+테스트는 Codex 사용량·크레딧·재설정권 파싱과 401/403 단일 재시도, OpenCode Go API 응답 검증·API 키 정리·인증 오류와 접근 거부 구분·사용률 및 초기화 카운트다운, Cursor 사용량·지출 파싱과 세션 토큰 정리, Ollama 설정 페이지 파싱과 세션 쿠키 정리, OpenRouter 크레딧 응답 파싱과 API 키 정리, 자격 증명 압축·분할 저장, 설정 파일 읽기/쓰기, 금액·기간 표시, 팝업 렌더링(오프스크린 Qt)을 검사합니다. 실제 계정이나 네트워크 호출은 사용하지 않습니다.
 
 ## 문제 해결
 
@@ -372,8 +366,9 @@ Windows:
 - **앱이 보이지 않음**: 숨겨진 트레이 아이콘 영역을 확인하고 `run.command` / `run.bat`으로 교체 실행하세요.
 - **Codex 로그인이 완료되지 않음**: 브라우저 승인을 15분 안에 마쳤는지 확인하고, 로그에서 `Device login approved`와 `OAuth credentials saved`를 확인하세요.
 - **Codex 로그인이 만료됨**: 로그아웃한 뒤 다시 로그인하세요. 취소·만료·폐기된 refresh token은 복구할 수 없습니다.
-- **OpenCode 세션이 만료됨**: `auth` 쿠키를 다시 복사해 세션 키를 등록하세요. 콘솔에서 로그아웃하면 키도 무효화됩니다.
-- **OpenCode 사용량을 읽지 못함**: 콘솔 HTML 구조가 바뀐 경우입니다. 마지막 응답이 `~/.llm-usage-meter/opencode-last-fetch.html`에 저장되니 로그와 함께 확인하세요.
+- **OpenCode 키가 거부됨(401)**: 키가 삭제되고 카드가 로그아웃 상태가 됩니다. 콘솔에서 개인 API 키를 다시 생성해 등록하세요. 기존 `auth` 쿠키로는 조회할 수 없습니다.
+- **OpenCode 접근 불가(403)**: 개인 API 키의 권한, 선택한 워크스페이스와 Go 구독을 확인하세요. 키는 유지되므로 **API 키 입력...**으로 다른 키를 등록할 수 있습니다.
+- **OpenCode 사용량을 읽지 못함**: 네트워크·서버 오류 또는 사용량 API 응답 변경일 수 있습니다. 로그를 확인하세요. HTML 파일을 저장하거나 홈페이지 파서로 우회하지 않습니다.
 - **Ollama 세션이 만료됨**: `aid`·`__Secure-session` 쿠키를 다시 복사해 등록하세요. ollama.com에서 로그아웃하면 쿠키도 무효화됩니다.
 - **Ollama 사용량을 읽지 못함**: 설정 페이지 HTML 구조가 바뀐 경우입니다. 마지막 응답이 `~/.llm-usage-meter/ollama-last-fetch.html`에 저장되니 로그와 함께 확인하세요.
 - **OpenRouter에서 403 안내가 표시됨**: 등록한 키로는 크레딧 조회가 막힌 것입니다. `management-keys` 페이지에서 Management 키(`sk-or-mgmt-`)를 발급해 다시 등록하세요.
@@ -385,13 +380,12 @@ Windows:
 
 ## 내부 API 주의사항
 
-이 앱은 대부분 문서화되지 않은 내부 엔드포인트를 사용합니다. OpenRouter만 공식 문서화된 엔드포인트입니다.
+이 앱은 대부분 문서화되지 않은 내부 엔드포인트를 사용합니다. OpenRouter는 공식 문서화된 엔드포인트이며, OpenCode Go는 공식 클라이언트 소스에서 사용을 확인한 API입니다. OpenCode 사용량 API의 공개 문서상 상세 계약이나 장기 호환성이 보장된다는 뜻은 아닙니다.
 
 ```text
 GET https://chatgpt.com/backend-api/wham/usage
 GET https://chatgpt.com/backend-api/wham/rate-limit-reset-credits
-GET https://opencode.ai/workspace/<workspace>/go       (SSR HTML 파싱)
-GET https://opencode.ai/auth, /auth/status
+GET https://opencode.ai/zen/go/v1/usage                 (Bearer API 키 · Go 사용률)
 GET https://cursor.com/api/usage-summary
 POST https://cursor.com/api/dashboard/get-hard-limit
 POST https://cursor.com/api/dashboard/get-plan-info

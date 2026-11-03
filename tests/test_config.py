@@ -27,7 +27,7 @@ class ConfigFileTests(unittest.TestCase):
 
     def test_round_trip_keeps_provider_settings(self):
         cfg = config.Config(refresh_interval=30, provider_order=["opencode", "codex"])
-        cfg.provider("opencode")["workspace_id"] = "wrk_123"
+        cfg.provider("opencode")["enabled"] = True
         cfg.set_provider_enabled("codex", False)
 
         config.save_config(cfg)
@@ -35,7 +35,7 @@ class ConfigFileTests(unittest.TestCase):
 
         self.assertEqual(loaded.refresh_interval, 30)
         self.assertEqual(loaded.provider_order, ["opencode", "codex"])
-        self.assertEqual(loaded.provider("opencode")["workspace_id"], "wrk_123")
+        self.assertTrue(loaded.provider("opencode")["enabled"])
         self.assertFalse(loaded.is_provider_enabled("codex"))
         self.assertTrue(loaded.is_provider_enabled("opencode"))
 

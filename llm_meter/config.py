@@ -1,8 +1,7 @@
 """Non-secret application settings.
 
-Secrets (OAuth tokens, session keys) live in the OS credential store, see
-``keystore``. This file only holds preferences and cheap cached lookups such
-as the discovered OpenCode workspace ID.
+Secrets (OAuth tokens, API keys, session cookies) live in the OS credential
+store, see ``keystore``. This file only holds non-secret preferences.
 """
 
 import json

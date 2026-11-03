@@ -1,69 +1,59 @@
-"""OpenCode session-key handling.
+"""User-supplied OpenCode API keys, kept in the OS credential store."""
 
-The console authenticates browsers with an ``auth`` cookie. Reading that cookie
-out of an installed browser is not viable (Chromium 127+ App-Bound Encryption on
-Windows, Keychain and Full-Disk-Access prompts on macOS), so the key is supplied
-by the user — pasted from the clipboard or typed in — and kept in the OS
-credential store.
-"""
-
-import logging
+import re
 from typing import Optional
 
 from ... import keystore
 from ...i18n import tr
 
-logger = logging.getLogger(__name__)
-
-KEYSTORE_ACCOUNT = "opencode-session"
-
-_MIN_KEY_LENGTH = 20
+KEYSTORE_ACCOUNT = "opencode-api-key"
 
 
 class AuthError(Exception):
-    """The session key could not be read or stored."""
+    """The API key could not be read or stored."""
 
 
 def instructions() -> str:
     return tr(
-        "1. https://opencode.ai/auth 에서 로그인하세요\n"
-        "2. 개발자 도구(F12) → 애플리케이션/저장소 → 쿠키 → https://opencode.ai\n"
-        "3. 'auth' 쿠키의 값을 복사하세요",
-        "1. Sign in at https://opencode.ai/auth\n"
-        "2. Open DevTools (F12) → Application/Storage → Cookies → https://opencode.ai\n"
-        "3. Copy the value of the 'auth' cookie",
+        "1. https://opencode.ai/console 에서 로그인하세요\n"
+        "2. Account → Personal API keys에서 Go 구독 워크스페이스의 개인 API 키를 생성하세요\n"
+        "3. API 키를 복사하세요 (브라우저의 'auth' 쿠키가 아닙니다)",
+        "1. Sign in at https://opencode.ai/console\n"
+        "2. In Account → Personal API keys, create a personal API key for your Go workspace\n"
+        "3. Copy the API key (not the browser's 'auth' cookie)",
     )
 
 
-def clean_session_key(value: Optional[str]) -> Optional[str]:
-    """Normalize a pasted session key; None when it cannot be one."""
+def clean_key(value: Optional[str]) -> Optional[str]:
+    """Accept a key or pasted bearer header, never a browser cookie pair."""
     if not value:
         return None
     text = value.strip().strip("\"'").strip()
-    if text.lower().startswith("auth="):
-        text = text[len("auth="):]
-    # Quotes are stripped again: DevTools copies the pair as auth="value";
-    text = text.strip().rstrip(";").strip().strip("\"'").strip()
-    if len(text) < _MIN_KEY_LENGTH or any(char.isspace() for char in text):
+    if text.lower().startswith("authorization:"):
+        text = text.split(":", 1)[1].strip()
+    if text[:7].lower() == "bearer ":
+        text = text[7:].strip()
+    text = text.rstrip(";").strip().strip("\"'").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{20,}", text):
         return None
     return text
 
 
-def load_session_key() -> Optional[str]:
+def load_key() -> Optional[str]:
     try:
         return keystore.get(KEYSTORE_ACCOUNT)
     except keystore.KeystoreError as exc:
         raise AuthError(str(exc)) from exc
 
 
-def save_session_key(value: str) -> None:
+def save_key(value: str) -> None:
     try:
         keystore.set(KEYSTORE_ACCOUNT, value)
     except keystore.KeystoreError as exc:
         raise AuthError(str(exc)) from exc
 
 
-def delete_session_key() -> None:
+def delete_key() -> None:
     try:
         keystore.delete(KEYSTORE_ACCOUNT)
     except keystore.KeystoreError as exc:

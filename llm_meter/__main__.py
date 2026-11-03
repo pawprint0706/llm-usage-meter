@@ -34,7 +34,8 @@ def _uninstall() -> None:
     autostart.disable()
     for remove in (
         codex_auth.delete_credentials,
-        opencode_auth.delete_session_key,
+        opencode_auth.delete_key,
+        lambda: keystore.delete("opencode-session"),  # Pre-API-key installs.
         cursor_auth.delete_pasted_session_token,
         ollama_auth.delete_aid,
         ollama_auth.delete_session,

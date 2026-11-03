@@ -405,6 +405,45 @@ class ContentTests(PopupTestCase):
 
 
 class SizeTests(PopupTestCase):
+    def test_a_short_section_does_not_absorb_surplus_card_height(self):
+        """Regression: a taller card stretched the credits section, opening a gap
+        between its title and the balance row."""
+        from datetime import datetime, timedelta, timezone
+
+        from llm_meter.providers.codex import api as codex_api
+        from llm_meter.ui.widgets import SectionView
+
+        codex = next(provider for provider in self.providers if provider.id == "codex")
+        now = datetime.now(timezone.utc)
+        codex.data = codex_api.UsageData(
+            windows=[codex_api.UsageWindow(100, now + timedelta(minutes=16), 5 * 3600)],
+            plan_type="plus",
+            credits=codex_api.CreditBalance(balance=0.0),
+            reset_credits=[
+                codex_api.ResetCredit(
+                    str(index), "full", "available", "Full reset (Weekly + 5 hr)", None,
+                    now + timedelta(days=3 + index, hours=18),
+                )
+                for index in range(3)
+            ],
+            available_reset_count=3,
+        )
+        codex.snapshot = codex.render(codex.data)
+        codex.state = State.READY
+
+        card = ProviderCard(codex, theme.DARK, self.popup._hooks)
+        natural = card.sizeHint()
+        card.resize(natural.width(), natural.height() + 60)
+        card.layout().activate()
+
+        credits = next(
+            section
+            for section in card.findChildren(SectionView)
+            if any(label.text() == "Credits" for label in section.findChildren(QLabel))
+        )
+
+        self.assertEqual(credits.height(), credits.sizeHint().height())
+
     def test_show_near_finalises_the_size_before_the_window_is_mapped(self):
         """The first painted frame must not be resized on the next event-loop tick."""
         self.make_ready()

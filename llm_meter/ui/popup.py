@@ -615,8 +615,7 @@ class PopupWindow(QWidget):
             page = tabs.currentWidget()
             card = page.findChild(ProviderCard) if page is not None else None
             if page is not None and card is not None:
-                card.adjustSize()
-                page_height = TAB_TO_CARD_GAP + card.sizeHint().height()
+                page_height = self._page_height(card, PANEL_WIDTH - 2 * PANEL_MARGIN)
                 # Every page gets the active one's height: a stacked layout reports the
                 # tallest page, so a taller tab visited earlier would otherwise keep the
                 # panel stretched below the card.
@@ -649,6 +648,24 @@ class PopupWindow(QWidget):
         if self.height() > cap:
             self._scroll.setFixedHeight(max(120, wanted - (self.height() - cap)))
             self._settle()
+
+    @staticmethod
+    def _page_height(card: ProviderCard, width: int) -> int:
+        """The card's height at the panel's content width.
+
+        Wrapped labels otherwise report a height for a placeholder width, which
+        overstates the card and leaves the slack inside it. ``sizeHint`` stays
+        the upper bound so this can only trim dead space.
+        """
+        height = card.sizeHint().height()
+        layout = card.layout()
+        if layout is not None and width > 0:
+            needed = layout.heightForWidth(width)
+            if needed > 0:
+                needed = max(needed, layout.minimumSize().height())
+                frame = card.sizeHint().height() - layout.sizeHint().height()
+                height = min(height, needed + max(0, frame))
+        return TAB_TO_CARD_GAP + height
 
     def _settle(self) -> None:
         """Shrinking needs the nested layouts recomputed first, otherwise

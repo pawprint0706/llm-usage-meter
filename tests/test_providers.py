@@ -214,13 +214,13 @@ class OpenCodeRenderTests(unittest.TestCase):
     def render(self, data=None):
         return self.provider.render(Loaded(go=data or go_usage()))
 
-    def test_used_percentages_drive_the_metrics_and_shortest_window_gauge(self):
+    def test_remaining_percent_is_shown_while_used_percent_drives_the_bar(self):
         snapshot = self.render()
         self.assertEqual(len(snapshot.sections), 1)
         metrics = snapshot.sections[0].metrics
         self.assertEqual([metric.percent for metric in metrics], [53, 20, 10])
         self.assertEqual([metric.value for metric in metrics],
-                         ["53.0% used", "20.0% used", "10.0% used"])
+                         ["47% / 100%", "80% / 100%", "90% / 100%"])
         self.assertEqual(snapshot.gauge_percent, 53)
 
     def test_countdowns_use_absolute_resets_and_shrink_without_a_fetch(self):
@@ -245,7 +245,7 @@ class OpenCodeRenderTests(unittest.TestCase):
         )).sections[0].metrics[0]
         self.assertEqual(metric.percent, 33)
         self.assertIn("rate-limited", metric.detail)
-        self.assertEqual(metric.value, "33.0% used")
+        self.assertEqual(metric.value, "67% / 100%")
 
     def test_zero_and_full_usage_are_not_inverted(self):
         snapshot = self.render(go_usage(
@@ -253,8 +253,8 @@ class OpenCodeRenderTests(unittest.TestCase):
             monthly=opencode_api.UsageWindow(100, "rate-limited", in_hours(2)),
         ))
         self.assertEqual(snapshot.gauge_percent, 0)
-        self.assertEqual(snapshot.sections[0].metrics[0].value, "0.0% used")
-        self.assertEqual(snapshot.sections[0].metrics[2].value, "100.0% used")
+        self.assertEqual(snapshot.sections[0].metrics[0].value, "100% / 100%")
+        self.assertEqual(snapshot.sections[0].metrics[2].value, "0% / 100%")
 
 
 class OpenCodeKeyTests(unittest.TestCase):

@@ -243,6 +243,9 @@ class ProviderCard(QFrame):
             if provider.message:
                 color = palette.danger if provider.state is State.ERROR else palette.faint
                 layout.addWidget(_label(self, provider.message, color, -2, wrap=True))
+            # Any surplus height must fall below the content, never into a
+            # section (which would widen the gap under a section title).
+            layout.addStretch(1)
 
     def _header(self, provider: Provider, palette: Palette) -> QHBoxLayout:
         header = QHBoxLayout()

@@ -98,8 +98,8 @@ class OpenCodeProvider(Provider):
                 detail += tr(" · 사용 제한됨", " · rate-limited")
             metrics.append(Metric(
                 label=tr(korean, english),
-                value=tr(f"{fmt.percent(window.percent, 1)} 사용",
-                         f"{fmt.percent(window.percent, 1)} used"),
+                # The fuel gauge reads what is left: the text matches the bar.
+                value=f"{fmt.percent(100.0 - window.percent)} / {fmt.percent(100.0)}",
                 percent=window.percent,
                 detail=detail,
             ))

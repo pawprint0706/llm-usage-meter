@@ -1,19 +1,7 @@
-"""Ollama Cloud settings client: usage, model stats and extra-usage balance.
-
-The settings page is a server-rendered htmx app, so all data arrives embedded
-in the HTML of ``GET /settings`` — there is no JSON API. The page is fetched
-with the ``aid`` and ``__Secure-session`` cookies and parsed with regexes
-anchored on stable data attributes:
-
-    aria-label="Monthly usage $0.03 of $60 used"   (included-usage meter)
-    data-time="2026-10-01T00:38:02Z"               (reset instant, UTC)
-    data-usage-segment data-model="..." data-requests="14"
-    Balance remaining ... $0
-"""
+"""Ollama Cloud balances and rolling usage history via the documented APIs."""
 
 import logging
-import os
-import re
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
@@ -23,52 +11,51 @@ import requests
 logger = logging.getLogger(__name__)
 
 SETTINGS_PAGE = "https://ollama.com/settings"
-
-_REDIRECT_CODES = (301, 302, 303, 307, 308)
-
-# The included-usage meter exposes dollars, not percent: the plan grants a
-# monthly credit and the bar segments are per-model shares of it.
-_METER_RE = re.compile(
-    r'aria-label="(Monthly usage) \$([0-9.]+) of \$([0-9.]+) used"'
-)
-_RESET_RE = re.compile(r'data-time="([^"]+)"')
-_SEGMENT_RE = re.compile(
-    r'data-usage-segment[^>]*data-model="([^"]*)"[^>]*data-requests="(\d+)"'
-)
-_BALANCE_RE = re.compile(
-    r"Balance remaining.*?<div class=\"text-2xl[^\"]*\"[^>]*>([^<]*)<",
-    re.DOTALL,
-)
-_PLAN_RE = re.compile(
-    r"<span\s+class=\"text-xs font-normal px-2 py-0.5 rounded-full"
-    r" bg-neutral-100 text-neutral-600 capitalize\"\s*>\s*([^<]*)</span\s*>"
-)
+BALANCE_URL = "https://ollama.com/api/balance"
+USAGE_URL = "https://ollama.com/api/usage"
 
 
 class ApiError(Exception):
-    """Base class for settings-page errors."""
+    """Base class for account API errors."""
 
 
 class AuthExpiredError(ApiError):
-    """The session cookies are missing, invalid or expired."""
+    """The API key is missing, invalid or revoked."""
+
+
+class ScopeError(ApiError):
+    """The account cannot access the endpoint (HTTP 403)."""
 
 
 class FetchError(ApiError):
-    """The settings page returned an unexpected HTTP response."""
+    """The endpoint returned an unexpected HTTP response."""
+
+
+class RateLimitError(FetchError):
+    def __init__(self, retry_after: Optional[int]):
+        self.retry_after = retry_after
+        detail = f"; retry after {retry_after}s" if retry_after is not None else ""
+        super().__init__(f"Ollama API rate limit (HTTP 429){detail}")
 
 
 class ParseError(ApiError):
-    """The settings HTML could not be parsed."""
+    """The API response does not match the documented contract."""
 
 
 @dataclass
 class UsageWindow:
     label: str
-    used: float
-    total: float
-    percent: float
-    reset_at: Optional[datetime]
-    models: list["ModelUsage"]
+    percent: Optional[float]  # Used percentage; None when no allowance exists.
+    reset_at: datetime
+    balance: Optional[float] = None
+    total: Optional[float] = None
+
+
+@dataclass
+class BalanceData:
+    windows: list[UsageWindow]
+    purchased: float
+    included_error: Optional[str] = None
 
 
 @dataclass
@@ -78,137 +65,159 @@ class ModelUsage:
 
 
 @dataclass
-class SettingsData:
-    plan: Optional[str] = None
-    monthly: Optional[UsageWindow] = None
-    balance: Optional[float] = None
-    balance_text: Optional[str] = None
-    error: Optional[str] = None
+class UsageHistory:
+    requests: int
+    models: list[ModelUsage]
+    other_requests: int = 0
 
 
-def _session(aid: str, session_value: str) -> requests.Session:
-    session = requests.Session()
-    session.cookies.set("aid", aid, domain="ollama.com", path="/")
-    session.cookies.set("__Secure-session", session_value, domain="ollama.com", path="/")
-    return session
+@dataclass
+class CloudData:
+    balance: BalanceData
+    history: Optional[UsageHistory] = None
+    history_error: Optional[str] = None
 
 
-def _parse_money(text: str) -> Optional[float]:
-    """Parse a '$12.50' / '$0' balance string; None when it is not money."""
-    if not text:
-        return None
-    match = re.search(r"\$([0-9]+(?:\.[0-9]+)?)", text)
-    if not match:
-        return None
-    return float(match.group(1))
+def _object(value: object, name: str) -> dict:
+    if not isinstance(value, dict):
+        raise ParseError(f"missing Ollama {name} object")
+    return value
 
 
-def _parse_reset(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
+def _number(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ParseError(f"invalid Ollama {name}")
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
+        number = float(value)
+    except OverflowError as exc:
+        raise ParseError(f"invalid Ollama {name}") from exc
+    if not math.isfinite(number):
+        raise ParseError(f"invalid Ollama {name}")
+    return number
 
 
-def parse_settings(html: str) -> SettingsData:
-    """Extract usage, model stats and balance from the settings HTML."""
-    data = SettingsData()
+def _timestamp(value: object, name: str) -> datetime:
+    if not isinstance(value, str):
+        raise ParseError(f"missing Ollama {name} timestamp")
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ParseError(f"invalid Ollama {name} timestamp") from exc
+    if instant.tzinfo is None or instant.utcoffset() is None:
+        raise ParseError(f"Ollama {name} timestamp has no timezone")
+    return instant
 
-    plan = _PLAN_RE.search(html)
-    if plan:
-        data.plan = plan.group(1).strip() or None
 
-    meters = list(_METER_RE.finditer(html))
-    resets = list(_RESET_RE.finditer(html))
-    segments = list(_SEGMENT_RE.finditer(html))
+def parse_balance(payload: object) -> BalanceData:
+    payload = _object(payload, "balance")
+    purchased = _object(payload.get("purchased"), "purchased")
+    data = BalanceData([], _number(purchased.get("balance_usd"), "purchased balance"))
+    try:
+        data.windows = _parse_included(payload.get("included"))
+    except ParseError as exc:
+        # Unknown/absent included allowances are not zero usage. Keep the
+        # independently validated purchased balance and expose the failure.
+        data.included_error = str(exc)
+        logger.warning("Could not read Ollama included balance: %s", exc)
+    return data
 
-    # Each meter carries its own model segments, so assign every segment to
-    # the meter it appears after.
-    by_meter: dict[int, list[ModelUsage]] = {}
-    for segment in segments:
-        meter_index = None
-        for index, match in enumerate(meters):
-            if match.start() < segment.start():
-                meter_index = index
-            else:
-                break
-        if meter_index is None:
-            continue
-        by_meter.setdefault(meter_index, []).append(
-            ModelUsage(name=segment.group(1), requests=int(segment.group(2)))
-        )
 
-    for index, match in enumerate(meters):
-        label = match.group(1)
-        used = float(match.group(2))
-        total = float(match.group(3))
-        percent = used / total * 100 if total else 0.0
-        # The reset instant is the first data-time after the meter; the ones
-        # further down belong to the recent-requests list.
-        reset = next(
-            (_parse_reset(reset.group(1)) for reset in resets if reset.start() > match.start()),
-            None,
-        )
-        if label == "Monthly usage":
-            data.monthly = UsageWindow(
+def _parse_included(value: object) -> list[UsageWindow]:
+    included = _object(value, "included")
+    windows = []
+    if "session" in included or "weekly" in included:
+        # The documented legacy contract has both windows; it reports remaining,
+        # whereas the shared UI contract expects used percentages.
+        for label in ("session", "weekly"):
+            limit = _object(included.get(label), label)
+            remaining = _number(limit.get("remaining_percent"), f"{label} remaining percent")
+            if not 0 <= remaining <= 100:
+                raise ParseError(f"invalid Ollama {label} remaining percent")
+            windows.append(UsageWindow(
                 label=label,
-                used=used,
-                total=total,
-                percent=percent,
-                reset_at=reset,
-                models=by_meter.get(index, []),
-            )
+                percent=100.0 - remaining,
+                reset_at=_timestamp(limit.get("resets_at"), label),
+            ))
+    else:
+        balance = _number(included.get("balance_usd"), "included balance")
+        allowance = _number(included.get("allowance_usd"), "included allowance")
+        if allowance < 0:
+            raise ParseError("negative Ollama included allowance")
+        period = _object(included.get("period"), "included period")
+        start = _timestamp(period.get("from"), "period start")
+        reset = _timestamp(period.get("until"), "period end")
+        if reset <= start:
+            raise ParseError("invalid Ollama included period")
+        percent = min(100.0, max(0.0, (1.0 - balance / allowance) * 100)) if allowance else None
+        windows.append(UsageWindow("monthly", percent, reset, balance, allowance))
+    return windows
 
-    balance = _BALANCE_RE.search(html)
-    if balance:
-        text = balance.group(1).strip()
-        data.balance_text = text
-        data.balance = _parse_money(text)
 
-    if data.monthly is None and data.balance is None:
-        data.error = "no usage data found in the HTML"
-    return data
+def _request_count(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ParseError("invalid Ollama request count")
+    return value
 
 
-def fetch_settings(aid: str, session_value: str) -> SettingsData:
-    """Fetch and parse the settings page.
+def parse_history(payload: object) -> UsageHistory:
+    payload = _object(payload, "usage history")
+    if payload.get("range") != "30d":
+        raise ParseError("unexpected Ollama usage history range")
+    totals = _object(payload.get("totals"), "usage totals")
+    groups = totals.get("groups")
+    if not isinstance(groups, list):
+        raise ParseError("missing Ollama model groups")
+    models = []
+    for group in groups:
+        group = _object(group, "model group")
+        name = group.get("model")
+        if not isinstance(name, str) or not name.strip():
+            raise ParseError("missing Ollama model name")
+        models.append(ModelUsage(name=name, requests=_request_count(group.get("request_count"))))
+    other = 0
+    if "remainder" in totals:
+        other = _request_count(_object(totals["remainder"], "remainder").get("request_count"))
+    return UsageHistory(_request_count(totals.get("request_count")), models, other)
 
-    :raises AuthExpiredError: when the cookies are missing/expired.
-    :raises FetchError: when the page is unreachable or unparseable.
-    :raises requests.RequestException: on network failure.
-    """
-    if not aid or not session_value:
-        raise AuthExpiredError("no session cookies")
 
-    session = _session(aid, session_value)
-    response = session.get(SETTINGS_PAGE, timeout=15, allow_redirects=False)
-
-    if response.status_code in _REDIRECT_CODES:
-        location = response.headers.get("location", "?")
-        raise AuthExpiredError(f"session expired (redirected to {location})")
-    if response.status_code in (401, 403):
-        raise AuthExpiredError(f"HTTP {response.status_code}")
+def _get_json(session: requests.Session, url: str, params: Optional[dict] = None) -> object:
+    response = session.get(url, params=params, timeout=15, allow_redirects=False)
+    if response.status_code == 401:
+        raise AuthExpiredError("Ollama API key rejected (HTTP 401)")
+    if response.status_code == 403:
+        raise ScopeError("Ollama account access denied (HTTP 403)")
+    if response.status_code == 429:
+        try:
+            seconds = int(response.headers.get("Retry-After", ""))
+        except ValueError:
+            seconds = 0
+        raise RateLimitError(seconds if seconds > 0 else None)
     if response.status_code != 200:
-        raise FetchError(f"the settings page returned HTTP {response.status_code}")
-
-    data = parse_settings(response.text)
-    if data.error:
-        dump = _dump_html(response.text)
-        raise FetchError(f"{data.error} (page saved to {dump})")
-    return data
-
-
-def _dump_html(html: str) -> str:
-    """Save the unparseable page for diagnosis; returns the path."""
-    from ... import config
-
-    path = os.path.join(config.config_dir(), "ollama-last-fetch.html")
+        raise FetchError(f"Ollama API returned HTTP {response.status_code}")
     try:
-        with open(path, "w", encoding="utf-8") as handle:
-            handle.write(html)
-    except OSError as exc:
-        logger.warning("Could not dump the HTML: %s", exc)
-        return "<dump failed>"
-    return path
+        return response.json()
+    except ValueError as exc:
+        raise ParseError("Ollama API returned invalid JSON") from exc
+
+
+def fetch_cloud(api_key: str) -> CloudData:
+    if not api_key:
+        raise AuthExpiredError("no API key")
+    with requests.Session() as session:
+        session.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Accept": "application/json",
+            "User-Agent": "llm-usage-meter",
+        })
+        data = CloudData(balance=parse_balance(_get_json(session, BALANCE_URL)))
+        try:
+            data.history = parse_history(_get_json(session, USAGE_URL, {
+                "range": "30d", "group_by": "model", "scope": "self",
+            }))
+        except AuthExpiredError:
+            raise
+        except (FetchError, ParseError, ScopeError, requests.RequestException) as exc:
+            # A temporarily unavailable history must not hide current balances.
+            data.history_error = str(exc)
+            logger.warning("Could not fetch Ollama usage history: %s", exc)
+        return data

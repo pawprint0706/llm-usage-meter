@@ -10,6 +10,7 @@ install_keyring_stub()
 
 from llm_meter import keystore
 from llm_meter.providers.codex import auth as codex_auth
+from llm_meter.providers.ollama import auth as ollama_auth
 from llm_meter.providers.openrouter import auth as openrouter_auth
 from llm_meter.providers.opencode import auth as opencode_auth
 
@@ -152,6 +153,32 @@ class CodexRefreshTests(StoreBackedTestCase):
 
         with self.assertRaises(codex_auth.AuthError):
             codex_auth.refresh_credentials(credentials(), session=session)
+
+
+class OllamaKeyCleanupTests(unittest.TestCase):
+    KEY = "ollama-key." + "k" * 32
+
+    def test_plain_and_bearer_keys_are_normalized(self):
+        for value in (self.KEY, f"Bearer {self.KEY}", f'Authorization: Bearer "{self.KEY}";'):
+            with self.subTest(value=value):
+                self.assertEqual(ollama_auth.clean_key(value), self.KEY)
+
+    def test_browser_cookie_pairs_and_header_injection_are_rejected(self):
+        for value in (None, "", "short", "aid=" + "a" * 32, "__Secure-session=" + "s" * 64,
+                      self.KEY + "\r\nHeader: injected"):
+            with self.subTest(value=value):
+                self.assertIsNone(ollama_auth.clean_key(value))
+
+
+class OllamaKeyStorageTests(StoreBackedTestCase):
+    def test_old_browser_cookies_are_never_read_as_an_api_key(self):
+        keystore.set("ollama-aid", "old-aid")
+        keystore.set("ollama-session", "old-session")
+        self.assertIsNone(ollama_auth.load_key())
+        ollama_auth.save_key("ollama-key." + "k" * 32)
+        ollama_auth.delete_key()
+        self.assertIsNone(ollama_auth.load_key())
+        self.assertEqual(keystore.get("ollama-session"), "old-session")
 
 
 class OpenCodeKeyCleanupTests(unittest.TestCase):

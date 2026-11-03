@@ -15,7 +15,7 @@ from llm_meter.providers.codex.provider import CodexProvider
 from llm_meter.providers.cursor import api as cursor_api
 from llm_meter.providers.cursor.provider import CursorProvider, Loaded as CursorLoaded
 from llm_meter.providers.ollama import api as ollama_api
-from llm_meter.providers.ollama.provider import OllamaProvider, Loaded as OllamaLoaded
+from llm_meter.providers.ollama.provider import OllamaProvider
 from llm_meter.providers.openrouter import api as openrouter_api
 from llm_meter.providers.openrouter.provider import (
     Loaded as OpenRouterLoaded,
@@ -339,19 +339,13 @@ class OpenCodeKeyTests(unittest.TestCase):
         self.assertEqual(self.provider.api_key, self.ui.answer)
 
 
-def ollama_settings(**overrides) -> ollama_api.SettingsData:
-    data = ollama_api.SettingsData(
-        plan="pro",
-        monthly=ollama_api.UsageWindow(
-            label="Monthly usage",
-            used=0.03,
-            total=60.0,
-            percent=0.05,
-            reset_at=datetime.now(timezone.utc) + timedelta(days=4),
-            models=[ollama_api.ModelUsage("glm-5.3-flash", 14)],
+def ollama_cloud(**overrides) -> ollama_api.CloudData:
+    data = ollama_api.CloudData(
+        balance=ollama_api.BalanceData(
+            windows=[ollama_api.UsageWindow("monthly", 27.5, in_hours(96), 72.5, 100)],
+            purchased=25,
         ),
-        balance=0.0,
-        balance_text="$0",
+        history=ollama_api.UsageHistory(20, [ollama_api.ModelUsage("glm-5.3-flash", 12)], 8),
     )
     for key, value in overrides.items():
         setattr(data, key, value)
@@ -360,246 +354,145 @@ def ollama_settings(**overrides) -> ollama_api.SettingsData:
 
 class OllamaRenderTests(unittest.TestCase):
     def setUp(self):
-        self.ui = FakeUi()
-        self.provider = OllamaProvider(Config(), self.ui)
+        self.provider = OllamaProvider(Config(), FakeUi())
 
-    def render(self, data=None):
-        return self.provider.render(
-            OllamaLoaded(data=data or ollama_settings(), monotonic=time.monotonic())
-        )
+    def test_included_and_purchased_balances_are_distinct(self):
+        snapshot = self.provider.render(ollama_cloud())
+        included = snapshot.sections[0].metrics[0]
+        purchased = snapshot.sections[1].metrics[0]
+        self.assertEqual(included.value, "$72.50 of $100")
+        self.assertEqual(purchased.value, "$25.00")
+        self.assertEqual(included.percent, 27.5)
+        self.assertEqual(snapshot.gauge_percent, 27.5)
+        self.assertIsNone(snapshot.badge)  # The API does not report a plan name.
 
-    def test_usage_and_balance_are_separate_sections(self):
-        snapshot = self.render()
+    def test_legacy_limits_show_remaining_but_send_used_percentage_to_the_gauge(self):
+        balance = ollama_api.BalanceData([
+            ollama_api.UsageWindow("session", 25, in_hours(1)),
+            ollama_api.UsageWindow("weekly", 60, in_hours(48)),
+        ], 0)
+        snapshot = self.provider.render(ollama_cloud(balance=balance))
+        self.assertEqual([metric.percent for metric in snapshot.sections[0].metrics], [25, 60])
+        self.assertEqual([metric.value for metric in snapshot.sections[0].metrics],
+                         ["75.0% remaining", "40.0% remaining"])
+        self.assertEqual(snapshot.gauge_percent, 25)
+        self.assertTrue(snapshot.sections[1].metrics[0].muted)
 
-        # The model list trails as an untitled section after the balance.
-        self.assertEqual(
-            [section.title for section in snapshot.sections],
-            ["Included usage", "Extra usage", ""],
-        )
-        self.assertEqual(snapshot.sections[0].url, ollama_api.SETTINGS_PAGE)
-        self.assertEqual(snapshot.badge, "pro")
-
-    def test_the_monthly_window_shows_its_dollars_and_countdown(self):
-        metrics = self.render().sections[0].metrics
-
-        self.assertEqual(metrics[0].label, "Monthly")
-        self.assertEqual(metrics[0].value, "$59.97 of $60")
-        self.assertAlmostEqual(metrics[0].percent, 0.05)
-        self.assertIn("resets in", metrics[0].detail)
-
-    def test_models_are_listed_after_the_balance(self):
-        metrics = self.render().sections[2].metrics
-
-        self.assertEqual(metrics[0].label, "glm-5.3-flash")
-        self.assertEqual(metrics[0].value, "14 req")
-        self.assertTrue(metrics[0].muted)
-
-    def test_korean_labels_use_the_slash_form(self):
-        with patch.dict("os.environ", {"LLM_METER_LANG": "ko"}):
-            metrics = self.render().sections[0].metrics
-            self.assertEqual(metrics[0].value, "$59.97 / $60")
-
-    def test_a_zero_balance_is_muted(self):
-        metric = self.render().sections[1].metrics[0]
-
-        self.assertEqual(metric.label, "Balance")
-        self.assertEqual(metric.value, "$0")
-        self.assertTrue(metric.muted)
-
-    def test_a_positive_balance_is_not_muted(self):
-        metric = self.render(ollama_settings(balance=12.5, balance_text="$12.50")).sections[1].metrics[0]
-
-        self.assertEqual(metric.value, "$12.50")
-        self.assertFalse(metric.muted)
-
-    def test_a_missing_balance_is_explained(self):
-        section = self.render(ollama_settings(balance=None, balance_text=None)).sections[1]
-
-        self.assertEqual(section.metrics, [])
-        self.assertEqual(section.note, "Could not fetch the balance")
-
-    def test_a_missing_usage_is_explained(self):
-        snapshot = self.render(ollama_settings(monthly=None))
-
-        section = snapshot.sections[0]
-        self.assertEqual(section.metrics, [])
-        self.assertEqual(
-            section.note, "Could not fetch the usage. Check your subscription"
-        )
+    def test_unknown_included_allowance_does_not_invent_a_free_usage_percentage(self):
+        balance = ollama_api.BalanceData([], 0, "unknown included shape")
+        snapshot = self.provider.render(ollama_cloud(balance=balance))
+        self.assertEqual(snapshot.sections[0].metrics, [])
+        self.assertIsNotNone(snapshot.sections[0].note)
         self.assertIsNone(snapshot.gauge_percent)
+        self.assertEqual(snapshot.sections[1].metrics[0].value, "$0.00")
 
-    def test_the_gauge_follows_the_monthly_usage(self):
-        snapshot = self.render()
+    def test_zero_allowance_has_no_gauge(self):
+        balance = ollama_api.BalanceData([
+            ollama_api.UsageWindow("monthly", None, in_hours(1), 0, 0),
+        ], 0)
+        snapshot = self.provider.render(ollama_cloud(balance=balance))
+        self.assertIsNone(snapshot.gauge_percent)
+        self.assertIsNone(snapshot.sections[0].metrics[0].percent)
 
-        self.assertAlmostEqual(snapshot.gauge_percent, 0.05)
+    def test_history_is_labeled_as_rolling_30_days_and_keeps_the_remainder(self):
+        section = self.provider.render(ollama_cloud()).sections[2]
+        self.assertEqual(section.title, "Requests in the last 30 days")
+        self.assertEqual([metric.value for metric in section.metrics], ["20 req", "12 req", "8 req"])
+        self.assertEqual(section.metrics[-1].label, "Other models")
 
-    def test_countdowns_shrink_as_time_passes(self):
-        loaded = OllamaLoaded(
-            data=ollama_settings(
-                monthly=ollama_api.UsageWindow(
-                    label="Monthly usage",
-                    used=0.03,
-                    total=60.0,
-                    percent=0.05,
-                    reset_at=datetime.now(timezone.utc) + timedelta(minutes=31),
-                    models=[],
-                )
-            ),
-            monotonic=time.monotonic(),
-        )
+    def test_failed_history_does_not_remove_the_balance_sections(self):
+        snapshot = self.provider.render(ollama_cloud(history=None, history_error="HTTP 503"))
+        self.assertEqual(snapshot.sections[1].metrics[0].value, "$25.00")
+        self.assertEqual(snapshot.sections[2].metrics, [])
+        self.assertIsNotNone(snapshot.sections[2].note)
 
-        metrics = self.provider.render(loaded).sections[0].metrics
+    def test_countdowns_are_recomputed_without_a_network_fetch(self):
+        now = datetime(2026, 11, 3, 12, tzinfo=timezone.utc)
+        balance = ollama_api.BalanceData([
+            ollama_api.UsageWindow("monthly", 25, now + timedelta(hours=1), 75, 100),
+        ], 0)
+        data = ollama_cloud(balance=balance)
+        with patch("llm_meter.providers.ollama.provider.datetime") as clock:
+            clock.now.return_value = now
+            first = self.provider.render(data).sections[0].metrics[0]
+            clock.now.return_value = now + timedelta(minutes=30)
+            later = self.provider.render(data).sections[0].metrics[0]
+        self.assertEqual(first.detail, "resets in 1h")
+        self.assertEqual(later.detail, "resets in 30m")
 
-        self.assertEqual(metrics[0].detail, "resets in 30m")
 
+class OllamaKeyTests(unittest.TestCase):
+    KEY = "ollama-key." + "k" * 32
 
-class OllamaSessionTests(unittest.TestCase):
     def setUp(self):
         self.ui = FakeUi()
         self.provider = OllamaProvider(Config(), self.ui)
-        self.saved_aid: list[str] = []
-        self.saved_session: list[str] = []
+        self.saved = []
         for patcher in (
-            patch(
-                "llm_meter.providers.ollama.provider.auth.load_aid",
-                return_value=None,
-            ),
-            patch(
-                "llm_meter.providers.ollama.provider.auth.load_session",
-                return_value=None,
-            ),
-            patch(
-                "llm_meter.providers.ollama.provider.auth.save_aid",
-                side_effect=self.saved_aid.append,
-            ),
-            patch(
-                "llm_meter.providers.ollama.provider.auth.save_session",
-                side_effect=self.saved_session.append,
-            ),
+            patch("llm_meter.providers.ollama.provider.auth.load_key", return_value=None),
+            patch("llm_meter.providers.ollama.provider.auth.save_key", side_effect=self.saved.append),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def entry(self, label: str):
-        return next(item for item in self.provider.menu() if item.label == label)
-
-    def test_a_signed_out_card_offers_both_ways_to_add_cookies(self):
-        labels = [entry.label for entry in self.provider.menu()]
-
-        self.assertIn("Paste aid from clipboard", labels)
-        self.assertIn("Paste __Secure-session from clipboard", labels)
-        self.assertIn("Enter session cookies...", labels)
-        self.assertNotIn("Sign out", labels)
-
-    def test_a_signed_in_card_hides_the_cookie_entries(self):
-        self.ui.answers = ["a" * 20, "s" * 40]
+    def adopt(self):
+        self.ui.answer = self.KEY
         self.provider.primary_action().run()
 
-        labels = [entry.label for entry in self.provider.menu()]
-
-        self.assertNotIn("Paste aid from clipboard", labels)
-        self.assertNotIn("Paste __Secure-session from clipboard", labels)
-        self.assertNotIn("Enter session cookies...", labels)
-        self.assertIn("Sign out", labels)
-
-    def test_pasting_an_aid_stores_it_and_refreshes(self):
-        self.ui.clipboard = "aid=abc12345;"
-
-        self.entry("Paste aid from clipboard").run()
-
-        self.assertEqual(self.saved_aid, ["abc12345"])
+    def test_pasted_bearer_key_authenticates_and_requests_a_refresh(self):
+        self.ui.clipboard = "Authorization: Bearer " + self.KEY
+        entry = next(item for item in self.provider.menu() if item.label == "Paste API key from clipboard")
+        entry.run()
+        self.assertEqual(self.saved, [self.KEY])
         self.assertEqual(self.ui.refresh_requests, ["ollama"])
-        self.assertFalse(self.provider.is_authenticated())
-
-    def test_pasting_a_session_stores_it_and_refreshes(self):
-        self.ui.clipboard = "__Secure-session=" + "k" * 40 + ";"
-
-        self.entry("Paste __Secure-session from clipboard").run()
-
-        self.assertEqual(self.saved_session, ["k" * 40])
-        self.assertEqual(self.ui.refresh_requests, ["ollama"])
-        self.assertFalse(self.provider.is_authenticated())
-
-    def test_both_cookies_make_the_card_authenticated(self):
-        self.ui.clipboard = "abc12345"
-        self.entry("Paste aid from clipboard").run()
-        self.ui.clipboard = "k" * 40
-        self.entry("Paste __Secure-session from clipboard").run()
-
         self.assertTrue(self.provider.is_authenticated())
 
-    def test_clipboard_junk_is_refused(self):
-        self.ui.clipboard = "hello world"
-
-        self.entry("Paste aid from clipboard").run()
-
-        self.assertEqual(self.saved_aid, [])
-        self.assertEqual(self.provider.message, "The clipboard does not look like an aid cookie")
-
-    def test_a_short_aid_is_refused(self):
-        self.ui.clipboard = "abc"
-
-        self.entry("Paste aid from clipboard").run()
-
-        self.assertEqual(self.saved_aid, [])
-
-    def test_the_prompt_explains_where_to_find_the_cookies(self):
-        self.ui.answers = ["a" * 20, "s" * 40]
-
-        self.provider.primary_action().run()
-
-        self.assertEqual(len(self.ui.prompts), 2)
-        title, prompt, secret = self.ui.prompts[0]
-        self.assertEqual(title, "Ollama aid cookie")
-        self.assertIn("DevTools", prompt)
-        self.assertTrue(secret)
-        title, prompt, secret = self.ui.prompts[1]
-        self.assertEqual(title, "Ollama __Secure-session cookie")
-        self.assertTrue(secret)
-        self.assertEqual(self.saved_aid, ["a" * 20])
-        self.assertEqual(self.saved_session, ["s" * 40])
-
-    def test_cancelling_the_first_prompt_changes_nothing(self):
+    def test_cancelling_replacement_keeps_the_existing_key(self):
+        self.adopt()
         self.ui.answer = None
-
         self.provider.primary_action().run()
+        self.assertEqual(self.provider.api_key, self.KEY)
+        self.assertEqual(self.saved, [self.KEY])
 
-        self.assertEqual(self.saved_aid, [])
-        self.assertEqual(self.saved_session, [])
-        self.assertEqual(self.provider.message, "")
-
-    def test_cancelling_the_second_prompt_keeps_the_aid(self):
-        self.ui.answers = ["a" * 20, None]
-
-        self.provider.primary_action().run()
-
-        self.assertEqual(self.saved_aid, ["a" * 20])
-        self.assertEqual(self.saved_session, [])
-        self.assertEqual(self.provider.message, "aid cookie saved")
-
-    def test_a_rejected_session_signs_the_card_out(self):
-        self.ui.answers = ["a" * 20, "s" * 40]
-        self.provider.primary_action().run()
-
-        with patch(
-            "llm_meter.providers.ollama.provider.auth.delete_aid"
-        ) as delete_aid, patch(
-            "llm_meter.providers.ollama.provider.auth.delete_session"
-        ) as delete_session, patch(
-            "llm_meter.providers.ollama.provider.api.fetch_settings",
-            side_effect=ollama_api.AuthExpiredError("gone"),
+    def test_401_signs_out_and_discards_the_snapshot(self):
+        self.adopt()
+        self.provider.snapshot = self.provider.render(ollama_cloud())
+        with patch("llm_meter.providers.ollama.provider.auth.delete_key"), patch(
+            "llm_meter.providers.ollama.provider.api.fetch_cloud",
+            side_effect=ollama_api.AuthExpiredError("rejected"),
         ):
             self.provider.refresh()
-
-        delete_aid.assert_called_once()
-        delete_session.assert_called_once()
         self.assertIs(self.provider.state, State.SIGNED_OUT)
-        self.assertTrue(self.ui.notified)
+        self.assertIsNone(self.provider.snapshot)
+        self.assertFalse(self.provider.is_authenticated())
 
-    def test_the_usage_page_opens(self):
-        self.entry("Open usage page").run()
+    def test_non_auth_errors_keep_the_key_and_previous_reading(self):
+        import requests
+        for error in (ollama_api.ScopeError("suspended"), ollama_api.RateLimitError(60),
+                      ollama_api.FetchError("503"), ollama_api.ParseError("bad"),
+                      requests.Timeout("timeout")):
+            with self.subTest(error=error):
+                self.adopt()
+                previous = self.provider.render(ollama_cloud())
+                self.provider.snapshot = previous
+                with patch("llm_meter.providers.ollama.provider.auth.delete_key") as delete, patch(
+                    "llm_meter.providers.ollama.provider.api.fetch_cloud", side_effect=error,
+                ):
+                    self.provider.refresh()
+                self.assertIs(self.provider.state, State.ERROR)
+                self.assertIs(self.provider.snapshot, previous)
+                self.assertTrue(self.provider.is_authenticated())
+                delete.assert_not_called()
 
-        self.assertEqual(self.ui.opened, [ollama_api.SETTINGS_PAGE])
+    def test_key_replacement_clears_the_other_accounts_cached_data(self):
+        self.adopt()
+        self.provider.data = ollama_cloud()
+        self.provider.snapshot = self.provider.render(self.provider.data)
+        self.ui.answer = "ollama-key." + "n" * 32
+        self.provider.primary_action().run()
+        self.assertIsNone(self.provider.snapshot)
+        self.assertIsNone(self.provider.data)
+        self.assertEqual(self.provider.api_key, self.ui.answer)
 
 
 def openrouter_credits(**overrides) -> openrouter_api.CreditsData:

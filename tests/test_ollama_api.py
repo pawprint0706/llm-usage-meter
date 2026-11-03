@@ -1,170 +1,189 @@
-import tempfile
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import requests
 
-from llm_meter import config
 from llm_meter.providers.ollama import api
 
-SETTINGS_HTML = """
-<div class="flex justify-between mb-2">
-  <span class="text-sm">Monthly usage</span>
-  <span class="text-sm "
-    >$0.03 of $60 used</span
-  >
-</div>
-<div class="relative group" data-usage-meter="">
-  <div class="relative h-3 overflow-hidden rounded-full bg-neutral-200" data-usage-track="" aria-label="Monthly usage $0.03 of $60 used">
-    <div class="flex h-full overflow-hidden bg-neutral-950" style="width: 0.1%; ">
-      <button type="button" class="relative h-full min-w-[2px] flex-none overflow-hidden border-r border-white p-0 last:border-r-0 focus-visible:outline-none" style="width: 100%; background: #4f46e5" data-usage-segment="" data-model="glm-5.3-flash" data-requests="14" aria-label="glm-5.3-flash: 14 requests"></button>
-    </div>
-  </div>
-</div>
-<div class="text-xs text-neutral-500 mt-1 local-time" data-time="2026-10-01T00:38:02Z">
-  Resets in 4 weeks.
-</div>
-<div id="monthly-usage-models" class="mt-3 space-y-1.5">
-  <div class="text-xs text-neutral-500">Models used this month</div>
-  <div class="flex min-w-0 items-center gap-2 text-xs">
-    <span class="h-2 w-2 flex-none rounded-sm" style="background: #4f46e5" aria-hidden="true"></span>
-    <span class="min-w-0 flex-1 truncate text-neutral-700" title="glm-5.3-flash">glm-5.3-flash</span>
-    <span class="flex-none tabular-nums text-neutral-400">
-      14 requests
-    </span>
-  </div>
-</div>
 
-<div class="mb-1 text-xs text-neutral-500">Recent requests</div>
-<div class="flex items-center gap-2">
-  <span class="text-xs text-neutral-400" data-time="2026-09-01T09:00:00Z">just now</span>
-</div>
-
-<h2 class="text-xl font-medium flex items-center space-x-2">
-  <span>Included usage</span>
-  <span
-    class="text-xs font-normal px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 capitalize"
-    >pro</span
-  >
-</h2>
-
-<div class="mb-1 text-xs text-neutral-500">Balance remaining</div>
-<div class="text-2xl font-medium leading-tight">$0</div>
-"""
+def balance_payload():
+    return {
+        "included": {
+            "balance_usd": 72.5, "allowance_usd": 100,
+            "period": {"from": "2026-09-15T09:30:00Z", "until": "2026-10-15T09:30:00Z"},
+        },
+        "purchased": {"balance_usd": 25},
+    }
 
 
-class ParseSettingsTests(unittest.TestCase):
-    def test_usage_window_models_and_balance_are_extracted(self):
-        data = api.parse_settings(SETTINGS_HTML)
-
-        self.assertEqual(data.plan, "pro")
-        self.assertIsNotNone(data.monthly)
-        self.assertEqual(data.monthly.label, "Monthly usage")
-        self.assertEqual(data.monthly.used, 0.03)
-        self.assertEqual(data.monthly.total, 60.0)
-        self.assertAlmostEqual(data.monthly.percent, 0.05)
-        self.assertEqual(data.monthly.reset_at.isoformat(), "2026-10-01T00:38:02+00:00")
-        self.assertEqual(
-            [(model.name, model.requests) for model in data.monthly.models],
-            [("glm-5.3-flash", 14)],
-        )
-        self.assertEqual(data.balance, 0.0)
-        self.assertEqual(data.balance_text, "$0")
-        self.assertIsNone(data.error)
-
-    def test_the_reset_time_is_not_taken_from_the_recent_requests_list(self):
-        data = api.parse_settings(SETTINGS_HTML)
-
-        self.assertEqual(data.monthly.reset_at.isoformat(), "2026-10-01T00:38:02+00:00")
-
-    def test_a_login_page_yields_an_error(self):
-        data = api.parse_settings("<html>Sign in to continue</html>")
-
-        self.assertIsNone(data.monthly)
-        self.assertIsNone(data.balance)
-        self.assertIn("no usage data", data.error)
-
-    def test_a_missing_balance_is_ignored(self):
-        html = SETTINGS_HTML.replace("Balance remaining", "Balance gone")
-
-        data = api.parse_settings(html)
-
-        self.assertIsNone(data.balance)
-        self.assertIsNone(data.error)
-
-    def test_a_missing_plan_is_ignored(self):
-        html = SETTINGS_HTML.replace('capitalize"\n    >pro</span', 'capitalize"\n    ></span')
-
-        data = api.parse_settings(html)
-
-        self.assertIsNone(data.plan)
-
-    def test_money_parsing(self):
-        self.assertEqual(api._parse_money("$12.50"), 12.5)
-        self.assertEqual(api._parse_money("$0"), 0.0)
-        self.assertIsNone(api._parse_money("n/a"))
-        self.assertIsNone(api._parse_money(""))
+def legacy_payload():
+    return {"included": {
+        "session": {"remaining_percent": 75, "resets_at": "2026-10-01T07:00:00Z"},
+        "weekly": {"remaining_percent": 40, "resets_at": "2026-10-05T00:00:00Z"},
+    }, "purchased": {"balance_usd": 0}}
 
 
-class FetchSettingsTests(unittest.TestCase):
-    def setUp(self):
-        self._dir = tempfile.TemporaryDirectory()
-        patcher = patch.object(config, "config_dir", return_value=self._dir.name)
-        patcher.start()
-        self.addCleanup(patcher.stop)
-        self.addCleanup(self._dir.cleanup)
+def history_payload():
+    return {"range": "30d", "scope": "self", "group_by": "model", "totals": {
+        "request_count": 20,
+        "groups": [{"model": "glm-5.3-flash", "request_count": 12},
+                   {"model": "gpt-oss:120b", "request_count": 3}],
+        "remainder": {"request_count": 5},
+    }}
+
+
+class BalanceTests(unittest.TestCase):
+    def test_included_credits_are_not_confused_with_purchased_credits(self):
+        data = api.parse_balance(balance_payload())
+        monthly = data.windows[0]
+        self.assertEqual(monthly.balance, 72.5)
+        self.assertEqual(monthly.total, 100)
+        self.assertAlmostEqual(monthly.percent, 27.5)
+        self.assertEqual(data.purchased, 25)
+        self.assertEqual(monthly.reset_at, datetime(2026, 10, 15, 9, 30, tzinfo=timezone.utc))
+        self.assertIsNone(data.included_error)
+
+    def test_legacy_remaining_percent_is_converted_to_used_percent(self):
+        data = api.parse_balance(legacy_payload())
+        self.assertEqual([window.label for window in data.windows], ["session", "weekly"])
+        self.assertEqual([window.percent for window in data.windows], [25, 60])
+        self.assertEqual(data.purchased, 0)
+
+    def test_unknown_included_shape_keeps_purchased_balance_without_inventing_a_meter(self):
+        for included in (None, {}, {"free": {"percent": 0}}, {"balance_usd": 0}):
+            with self.subTest(included=included):
+                payload = balance_payload()
+                payload["included"] = included
+                data = api.parse_balance(payload)
+                self.assertEqual(data.purchased, 25)
+                self.assertEqual(data.windows, [])
+                self.assertIsNotNone(data.included_error)
+
+    def test_zero_allowance_is_not_reported_as_zero_used_percent(self):
+        payload = balance_payload()
+        payload["included"].update(balance_usd=0, allowance_usd=0)
+        monthly = api.parse_balance(payload).windows[0]
+        self.assertIsNone(monthly.percent)
+        self.assertEqual(monthly.total, 0)
+
+    def test_usage_percent_is_bounded_when_balance_is_above_allowance_or_negative(self):
+        for balance, percent in ((120, 0), (-1, 100), (0, 100), (100, 0)):
+            with self.subTest(balance=balance):
+                payload = balance_payload()
+                payload["included"]["balance_usd"] = balance
+                self.assertEqual(api.parse_balance(payload).windows[0].percent, percent)
+
+    def test_invalid_purchased_balance_cannot_be_displayed_as_zero(self):
+        for value in (None, True, "0", float("inf"), float("nan"), 10**1000):
+            payload = balance_payload()
+            payload["purchased"]["balance_usd"] = value
+            with self.subTest(value=value), self.assertRaises(api.ParseError):
+                api.parse_balance(payload)
+
+    def test_one_malformed_legacy_window_does_not_make_a_partial_meter(self):
+        for remaining in (-1, 101, True, "75", float("nan")):
+            with self.subTest(remaining=remaining):
+                payload = legacy_payload()
+                payload["included"]["weekly"]["remaining_percent"] = remaining
+                data = api.parse_balance(payload)
+                self.assertEqual(data.windows, [])
+                self.assertIsNotNone(data.included_error)
+
+    def test_invalid_or_timezone_less_period_is_not_used_for_a_countdown(self):
+        for until in (None, "bad", "2026-10-15T09:30:00", "2026-09-14T09:30:00Z"):
+            with self.subTest(until=until):
+                payload = balance_payload()
+                payload["included"]["period"]["until"] = until
+                data = api.parse_balance(payload)
+                self.assertEqual(data.windows, [])
+                self.assertIsNotNone(data.included_error)
+
+
+class HistoryTests(unittest.TestCase):
+    def test_model_groups_and_remainder_are_preserved_without_requiring_token_costs(self):
+        data = api.parse_history(history_payload())
+        self.assertEqual(data.requests, 20)
+        self.assertEqual([(model.name, model.requests) for model in data.models],
+                         [("glm-5.3-flash", 12), ("gpt-oss:120b", 3)])
+        self.assertEqual(data.other_requests, 5)
+
+    def test_empty_usage_is_a_real_zero_not_a_parse_failure(self):
+        data = api.parse_history({"range": "30d", "totals": {"request_count": 0, "groups": []}})
+        self.assertEqual(data.requests, 0)
+        self.assertEqual(data.models, [])
+        self.assertEqual(data.other_requests, 0)
+
+    def test_a_different_period_is_not_mislabeled_as_30_days(self):
+        payload = history_payload()
+        payload["range"] = "7d"
+        with self.assertRaises(api.ParseError):
+            api.parse_history(payload)
+
+    def test_malformed_counts_and_models_are_rejected(self):
+        for group in ({"model": "m", "request_count": -1}, {"model": "m", "request_count": True},
+                      {"model": "", "request_count": 1}, {"model": "m", "request_count": "3"}):
+            payload = history_payload()
+            payload["totals"]["groups"] = [group]
+            with self.subTest(group=group), self.assertRaises(api.ParseError):
+                api.parse_history(payload)
+
+
+class FetchCloudTests(unittest.TestCase):
+    def response(self, status=200, payload=None, headers=None):
+        response = Mock(status_code=status, headers=headers or {})
+        response.json.return_value = payload
+        return response
 
     def fetch(self, *responses):
-        session = Mock()
-        session.get.side_effect = responses
-        with patch.object(api, "_session", return_value=session):
-            return api.fetch_settings("aid-value", "session-value"), session
+        with patch.object(api.requests, "Session") as constructor:
+            session = constructor.return_value.__enter__.return_value
+            session.get.side_effect = responses
+            return api.fetch_cloud("synthetic-api-key")
 
-    def page(self, status=200, text="", location=None):
-        return Mock(
-            status_code=status, text=text, headers={"location": location} if location else {}
-        )
+    def test_history_failure_does_not_hide_current_balances(self):
+        for failure in (self.response(503), self.response(403), self.response(429, headers={"Retry-After": "30"}),
+                        self.response(payload={}), requests.Timeout("timeout")):
+            with self.subTest(failure=failure):
+                data = self.fetch(self.response(payload=balance_payload()), failure)
+                self.assertEqual(data.balance.purchased, 25)
+                self.assertAlmostEqual(data.balance.windows[0].percent, 27.5)
+                self.assertIsNone(data.history)
+                self.assertIsNotNone(data.history_error)
 
-    def test_the_settings_page_is_fetched_with_both_cookies(self):
-        data, session = self.fetch(self.page(text=SETTINGS_HTML))
-
-        self.assertAlmostEqual(data.monthly.percent, 0.05)
-        self.assertEqual(session.get.call_count, 1)
-        self.assertEqual(session.get.call_args.args[0], api.SETTINGS_PAGE)
-
-    def test_a_redirect_means_the_session_expired(self):
+    def test_401_is_an_auth_error_even_if_balance_succeeded_first(self):
         with self.assertRaises(api.AuthExpiredError):
-            self.fetch(self.page(302, location="/signin"))
-
-    def test_rejected_requests_are_auth_errors(self):
+            self.fetch(self.response(401))
         with self.assertRaises(api.AuthExpiredError):
-            self.fetch(self.page(403))
+            self.fetch(self.response(payload=balance_payload()), self.response(401))
 
-    def test_other_statuses_are_fetch_errors(self):
-        with self.assertRaises(api.FetchError) as caught:
-            self.fetch(self.page(500))
+    def test_forbidden_is_not_invalid_credentials(self):
+        with self.assertRaises(api.ScopeError):
+            self.fetch(self.response(403))
 
-        self.assertIn("500", str(caught.exception))
+    def test_rate_limit_exposes_retry_after_without_issuing_a_retry(self):
+        with self.assertRaises(api.RateLimitError) as caught:
+            self.fetch(self.response(429, headers={"Retry-After": "60"}))
+        self.assertEqual(caught.exception.retry_after, 60)
 
-    def test_unparseable_html_is_a_fetch_error_and_is_dumped(self):
-        with self.assertRaises(api.FetchError) as caught:
-            self.fetch(self.page(text="<html>nothing useful</html>"))
+    def test_missing_or_invalid_retry_after_is_not_a_fake_wait_time(self):
+        for value in ("", "later", "-1", "0"):
+            with self.subTest(value=value), self.assertRaises(api.RateLimitError) as caught:
+                self.fetch(self.response(429, headers={"Retry-After": value}))
+            self.assertIsNone(caught.exception.retry_after)
 
-        self.assertIn("ollama-last-fetch.html", str(caught.exception))
+    def test_invalid_json_is_a_data_error_not_a_network_error(self):
+        response = self.response()
+        response.json.side_effect = requests.exceptions.JSONDecodeError("bad", "<html>", 0)
+        with self.assertRaises(api.ParseError):
+            self.fetch(response)
 
-    def test_a_missing_cookie_pair_is_refused_before_any_request(self):
-        with self.assertRaises(api.AuthExpiredError):
-            api.fetch_settings("", "session-value")
-        with self.assertRaises(api.AuthExpiredError):
-            api.fetch_settings("aid-value", "")
-
-
-class SessionCookieTests(unittest.TestCase):
-    def test_both_cookies_are_set_on_the_session(self):
-        session = api._session("aid-value", "session-value")
-
-        self.assertEqual(session.cookies.get("aid"), "aid-value")
-        self.assertEqual(session.cookies.get("__Secure-session"), "session-value")
+    def test_redirects_server_errors_and_transport_failures_do_not_expire_the_key(self):
+        for status in (302, 404, 503):
+            with self.subTest(status=status), self.assertRaises(api.FetchError):
+                self.fetch(self.response(status))
+        with self.assertRaises(requests.Timeout):
+            self.fetch(requests.Timeout("timeout"))
 
 
 if __name__ == "__main__":

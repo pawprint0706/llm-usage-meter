@@ -29,7 +29,6 @@ include = ["llm_meter*"]
 [tool.setuptools.data-files]
 "share/llm-usage-meter" = [
     "assets/codex-blossom.ico",
-    "assets/cursor-cube.svg",
     "assets/ollama-icon.svg",
     "assets/openrouter-icon.svg",
     "assets/app-icon.png",

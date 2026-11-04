@@ -1,6 +1,6 @@
 """Non-secret application settings.
 
-Secrets (OAuth tokens, API keys, session cookies) live in the OS credential
+Secrets (OAuth tokens, API keys) live in the OS credential
 store, see ``keystore``. This file only holds non-secret preferences.
 """
 

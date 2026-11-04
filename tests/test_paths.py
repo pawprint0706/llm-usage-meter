@@ -11,7 +11,7 @@ from llm_meter import paths
 
 class PathsTests(unittest.TestCase):
     def test_asset_finds_checkout_file(self):
-        found = paths.asset("cursor-cube.svg")
+        found = paths.asset("ollama-icon.svg")
         self.assertIsNotNone(found)
         self.assertTrue(os.path.isfile(found))
 
@@ -22,14 +22,14 @@ class PathsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             assets = os.path.join(tmp, "assets")
             os.makedirs(assets)
-            target = os.path.join(assets, "cursor-cube.svg")
+            target = os.path.join(assets, "ollama-icon.svg")
             with open(target, "w", encoding="utf-8") as handle:
                 handle.write("<svg/>")
             with patch.object(paths, "frozen", return_value=True), patch.object(
                 sys, "_MEIPASS", tmp, create=True
             ):
                 self.assertEqual(paths.bundle_dir(), tmp)
-                self.assertEqual(paths.asset("cursor-cube.svg"), target)
+                self.assertEqual(paths.asset("ollama-icon.svg"), target)
 
     def test_frozen_executable_path(self):
         with patch.object(paths, "frozen", return_value=True), patch.object(

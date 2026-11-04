@@ -17,15 +17,15 @@ def instructions() -> str:
     return tr(
         "1. https://opencode.ai/console 에서 로그인하세요\n"
         "2. Account → Personal API keys에서 Go 구독 워크스페이스의 개인 API 키를 생성하세요\n"
-        "3. API 키를 복사하세요 (브라우저의 'auth' 쿠키가 아닙니다)",
+        "3. API 키를 복사하세요",
         "1. Sign in at https://opencode.ai/console\n"
         "2. In Account → Personal API keys, create a personal API key for your Go workspace\n"
-        "3. Copy the API key (not the browser's 'auth' cookie)",
+        "3. Copy the API key",
     )
 
 
 def clean_key(value: Optional[str]) -> Optional[str]:
-    """Accept a key or pasted bearer header, never a browser cookie pair."""
+    """Accept a key or pasted bearer header."""
     if not value:
         return None
     text = value.strip().strip("\"'").strip()

@@ -17,7 +17,6 @@ from .base import (
     State,
 )
 from .codex.provider import CodexProvider
-from .cursor.provider import CursorProvider
 from .ollama.provider import OllamaProvider
 from .openrouter.provider import OpenRouterProvider
 from .opencode.provider import OpenCodeProvider
@@ -25,7 +24,6 @@ from .opencode.provider import OpenCodeProvider
 PROVIDER_CLASSES: tuple[type[Provider], ...] = (
     CodexProvider,
     OpenCodeProvider,
-    CursorProvider,
     OllamaProvider,
     OpenRouterProvider,
 )

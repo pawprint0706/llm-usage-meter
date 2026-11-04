@@ -12,8 +12,6 @@ from llm_meter.providers import build_providers
 from llm_meter.providers.base import State
 from llm_meter.providers.codex import api as codex_api
 from llm_meter.providers.codex.provider import CodexProvider
-from llm_meter.providers.cursor import api as cursor_api
-from llm_meter.providers.cursor.provider import CursorProvider, Loaded as CursorLoaded
 from llm_meter.providers.ollama import api as ollama_api
 from llm_meter.providers.ollama.provider import OllamaProvider
 from llm_meter.providers.openrouter import api as openrouter_api
@@ -61,7 +59,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(
             [provider.id for provider in providers],
-            ["codex", "opencode", "cursor", "ollama", "openrouter"],
+            ["codex", "opencode", "ollama", "openrouter"],
         )
         self.assertTrue(all(provider.enabled for provider in providers))
 
@@ -72,7 +70,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertEqual(
             [provider.id for provider in providers],
-            ["opencode", "codex", "cursor", "ollama", "openrouter"],
+            ["opencode", "codex", "ollama", "openrouter"],
         )
 
     def test_a_disabled_service_reports_itself_as_such(self):
@@ -83,7 +81,7 @@ class RegistryTests(unittest.TestCase):
 
         self.assertFalse(providers["codex"].enabled)
         self.assertTrue(providers["opencode"].enabled)
-        self.assertTrue(providers["cursor"].enabled)
+        self.assertTrue(providers["ollama"].enabled)
 
 
 class CodexRenderTests(unittest.TestCase):
@@ -692,110 +690,6 @@ class OpenRouterSessionTests(unittest.TestCase):
             self.ui.opened,
             [openrouter_api.CREDITS_PAGE, openrouter_api.ACTIVITY_PAGE, openrouter_api.LOGS_PAGE],
         )
-
-
-def cursor_usage(**overrides) -> cursor_api.UsageData:
-    data = cursor_api.parse_usage_summary(
-        {
-            "billingCycleStart": "2026-07-23T01:15:44.000Z",
-            "billingCycleEnd": "2026-08-23T01:15:44.000Z",
-            "membershipType": "pro",
-            "isUnlimited": False,
-            "autoModelSelectedDisplayMessage": "You've used 20% of your included total usage",
-            "individualUsage": {
-                "plan": {
-                    "enabled": True,
-                    "used": 2000,
-                    "limit": 2000,
-                    "remaining": 0,
-                    "breakdown": {"included": 2000, "bonus": 4981, "total": 6981},
-                    "autoPercentUsed": 8.3,
-                    "apiPercentUsed": 99.5,
-                    "totalPercentUsed": 20.2,
-                },
-                "onDemand": {"enabled": False, "used": 0, "limit": None, "remaining": None},
-            },
-        }
-    )
-    data.plan_name = "Pro"
-    data.plan_price = "$20/mo"
-    data.no_usage_based_allowed = True
-    for key, value in overrides.items():
-        setattr(data, key, value)
-    return data
-
-
-class CursorRenderTests(unittest.TestCase):
-    def setUp(self):
-        self.ui = FakeUi()
-        self.provider = CursorProvider(Config(), self.ui)
-        patcher = patch(
-            "llm_meter.providers.cursor.provider.auth.resolve_session",
-            return_value=None,
-        )
-        patcher.start()
-        self.addCleanup(patcher.stop)
-
-    def render(self, usage: cursor_api.UsageData | None = None):
-        loaded = CursorLoaded(usage=usage or cursor_usage(), monotonic=time.monotonic())
-        return self.provider.render(loaded)
-
-    def test_sections_cover_usage_and_spending(self):
-        titles = [section.title for section in self.render().sections]
-
-        self.assertEqual(titles, ["Plan usage", "Spending"])
-
-    def test_plan_usage_shows_total_auto_and_api(self):
-        metrics = self.render().sections[0].metrics
-
-        self.assertEqual(metrics[0].label, "Total")
-        # The fuel gauge reads what is left: 20.2% used leaves ~80%.
-        self.assertEqual(metrics[0].value, "80% / 100%")
-        self.assertAlmostEqual(metrics[0].percent, 20.2)
-        self.assertIn("resets in", metrics[0].detail)
-        self.assertEqual(metrics[1].label, "Auto")
-        self.assertEqual(metrics[2].label, "API")
-        self.assertEqual(metrics[2].value, "0% / 100%")
-        self.assertIsNone(self.render().sections[0].note)
-
-    def test_spending_shows_included_bonus_and_on_demand(self):
-        metrics = self.render().sections[1].metrics
-
-        self.assertEqual(metrics[0].label, "Included")
-        self.assertEqual(metrics[0].value, "$0.00 / $20")
-        self.assertAlmostEqual(metrics[0].percent, 100.0)
-        self.assertEqual(metrics[1].label, "Bonus")
-        self.assertEqual(metrics[1].value, "$49.81")
-        self.assertEqual(metrics[2].label, "On-demand")
-        self.assertEqual(metrics[2].value, "Off")
-        self.assertEqual(len(metrics), 3)
-
-    def test_badge_and_gauge_follow_the_plan(self):
-        snapshot = self.render()
-
-        self.assertEqual(snapshot.badge, "Pro")
-        self.assertAlmostEqual(snapshot.gauge_percent, 20.2)
-
-    def test_on_demand_spend_is_shown_when_enabled(self):
-        usage = cursor_usage()
-        usage.no_usage_based_allowed = False
-        usage.on_demand = cursor_api.OnDemandUsage(
-            enabled=True, used_cents=1234, limit_cents=5000
-        )
-
-        metric = self.render(usage).sections[1].metrics[2]
-
-        self.assertEqual(metric.label, "On-demand")
-        self.assertEqual(metric.value, "$37.66 / $50")
-        self.assertAlmostEqual(metric.percent, 24.68)
-
-    def test_menu_opens_usage_and_spending_pages(self):
-        labels = {entry.label: entry for entry in self.provider.menu()}
-
-        labels["Open usage page"].run()
-        labels["Open spending page"].run()
-
-        self.assertEqual(self.ui.opened, [cursor_api.USAGE_PAGE, cursor_api.SPENDING_PAGE])
 
 
 if __name__ == "__main__":

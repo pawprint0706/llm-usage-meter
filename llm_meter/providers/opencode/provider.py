@@ -51,8 +51,8 @@ class OpenCodeProvider(Provider):
         return bool(self.api_key)
 
     def signed_out_hint(self) -> str:
-        return tr("Go 개인 API 키를 입력하세요 (기존 세션 쿠키 사용 불가)",
-                  "Add your Go personal API key (not the old session cookie)")
+        return tr("Go 개인 API 키를 입력하세요",
+                  "Add your Go personal API key")
 
     def load(self) -> Loaded:
         key = self.api_key

@@ -16,9 +16,9 @@ class AuthError(Exception):
 def instructions() -> str:
     return tr(
         "1. https://ollama.com/settings/keys 에서 API 키를 생성하세요\n"
-        "2. 키 값을 복사하세요 (aid·__Secure-session 쿠키가 아닙니다)",
+        "2. 키 값을 복사하세요",
         "1. Create an API key at https://ollama.com/settings/keys\n"
-        "2. Copy the key value (not the aid or __Secure-session cookies)",
+        "2. Copy the key value",
     )
 
 

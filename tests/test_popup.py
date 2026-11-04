@@ -194,15 +194,15 @@ class ContentTests(PopupTestCase):
 
         tabs = self.tabs()
         self.assertIsNotNone(tabs)
-        self.assertEqual(tabs.count(), 5)
+        self.assertEqual(tabs.count(), 4)
         self.assertEqual(
-            self.popup._tab_ids, ["codex", "opencode", "cursor", "ollama", "openrouter"]
+            self.popup._tab_ids, ["codex", "opencode", "ollama", "openrouter"]
         )
         self.assertEqual(
             [tabs.tabToolTip(i) for i in range(tabs.count())],
-            ["Codex", "OpenCode", "Cursor", "Ollama", "OpenRouter"],
+            ["Codex", "OpenCode", "Ollama", "OpenRouter"],
         )
-        self.assertEqual(len(self.cards()), 5)
+        self.assertEqual(len(self.cards()), 4)
 
     def test_tab_order_follows_the_saved_provider_order(self):
         self.cfg.provider_order = ["opencode", "codex"]
@@ -213,11 +213,11 @@ class ContentTests(PopupTestCase):
         self.popup.rebuild()
 
         self.assertEqual(
-            self.popup._tab_ids, ["opencode", "codex", "cursor", "ollama", "openrouter"]
+            self.popup._tab_ids, ["opencode", "codex", "ollama", "openrouter"]
         )
         self.assertEqual(
             [self.tabs().tabToolTip(i) for i in range(self.tabs().count())],
-            ["OpenCode", "Codex", "Cursor", "Ollama", "OpenRouter"],
+            ["OpenCode", "Codex", "Ollama", "OpenRouter"],
         )
 
     def test_building_the_tabs_reports_the_default_selection_to_the_tray(self):
@@ -257,13 +257,13 @@ class ContentTests(PopupTestCase):
         self.popup.rebuild()
 
         tabs = self.tabs()
-        self.assertEqual(tabs.count(), 4)
-        self.assertEqual(self.popup._tab_ids, ["opencode", "cursor", "ollama", "openrouter"])
+        self.assertEqual(tabs.count(), 3)
+        self.assertEqual(self.popup._tab_ids, ["opencode", "ollama", "openrouter"])
         self.assertEqual(
             [tabs.tabToolTip(i) for i in range(tabs.count())],
-            ["OpenCode", "Cursor", "Ollama", "OpenRouter"],
+            ["OpenCode", "Ollama", "OpenRouter"],
         )
-        self.assertEqual(len(self.cards()), 4)
+        self.assertEqual(len(self.cards()), 3)
 
     def test_switching_tabs_keeps_the_selection_across_rebuilds(self):
         self.make_ready()
@@ -489,7 +489,7 @@ class SizeTests(PopupTestCase):
 
         self.popup.rebuild()
 
-        self.assertEqual(len(self.cards()), 5)
+        self.assertEqual(len(self.cards()), 4)
         self.assertEqual(self.popup.height(), tall)
 
     def test_returning_to_a_shorter_tab_does_not_leave_a_taller_panel(self):
@@ -594,17 +594,17 @@ class GlyphTests(unittest.TestCase):
     def test_each_service_has_its_own_mark(self):
         codex = glyphs.provider_pixmap("codex", 18, QColor("#000000")).toImage()
         opencode = glyphs.provider_pixmap("opencode", 18, QColor("#000000")).toImage()
-        cursor = glyphs.provider_pixmap("cursor", 18, QColor("#000000")).toImage()
+        ollama = glyphs.provider_pixmap("ollama", 18, QColor("#000000")).toImage()
         openrouter = glyphs.provider_pixmap("openrouter", 18, QColor("#000000")).toImage()
 
         self.assertFalse(codex.isNull())
-        self.assertFalse(cursor.isNull())
+        self.assertFalse(ollama.isNull())
         self.assertFalse(openrouter.isNull())
         self.assertNotEqual(codex, opencode)
-        self.assertNotEqual(cursor, codex)
-        self.assertNotEqual(cursor, opencode)
+        self.assertNotEqual(ollama, codex)
+        self.assertNotEqual(ollama, opencode)
         self.assertNotEqual(openrouter, codex)
-        self.assertNotEqual(openrouter, cursor)
+        self.assertNotEqual(openrouter, ollama)
 
 
 class UsageBarTests(unittest.TestCase):

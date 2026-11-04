@@ -26,7 +26,6 @@ def _handlers() -> list[logging.Handler]:
 def _uninstall() -> None:
     from . import autostart, config, keystore
     from .providers.codex import auth as codex_auth
-    from .providers.cursor import auth as cursor_auth
     from .providers.ollama import auth as ollama_auth
     from .providers.openrouter import auth as openrouter_auth
     from .providers.opencode import auth as opencode_auth
@@ -36,7 +35,7 @@ def _uninstall() -> None:
         codex_auth.delete_credentials,
         opencode_auth.delete_key,
         lambda: keystore.delete("opencode-session"),  # Pre-API-key installs.
-        cursor_auth.delete_pasted_session_token,
+        lambda: keystore.delete("cursor-session"),  # Cursor support removed.
         ollama_auth.delete_key,
         lambda: keystore.delete("ollama-aid"),  # Pre-API-key installs.
         lambda: keystore.delete("ollama-session"),

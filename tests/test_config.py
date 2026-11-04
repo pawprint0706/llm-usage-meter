@@ -85,8 +85,8 @@ class ProviderOrderTests(unittest.TestCase):
         cfg = config.Config(provider_order=["opencode"])
 
         self.assertEqual(
-            cfg.ordered_provider_ids(["codex", "opencode", "cursor"]),
-            ["opencode", "codex", "cursor"],
+            cfg.ordered_provider_ids(["codex", "opencode", "ollama"]),
+            ["opencode", "codex", "ollama"],
         )
 
     def test_unknown_saved_ids_are_ignored(self):

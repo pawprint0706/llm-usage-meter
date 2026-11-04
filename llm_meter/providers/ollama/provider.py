@@ -39,8 +39,7 @@ class OllamaProvider(Provider):
         return bool(self.api_key)
 
     def signed_out_hint(self) -> str:
-        return tr("API 키를 입력하세요 (기존 세션 쿠키 사용 불가)",
-                  "Add your API key (not the old session cookies)")
+        return tr("API 키를 입력하세요", "Add your API key")
 
     def load(self) -> api.CloudData:
         key = self.api_key
